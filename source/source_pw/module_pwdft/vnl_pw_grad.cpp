@@ -8,19 +8,19 @@
 
 #include <vector>
 
+void pseudopot_cell_vnl::ensure_grad_table(const UnitCell& cell)
+{
+    if (this->nkb > 0 && this->gradient_version_ != this->table_version_)
+    {
+        this->initgradq_vnl(cell);
+    }
+}
+
 void pseudopot_cell_vnl::initgradq_vnl(const UnitCell &cell)
 {
-    const int nbrx = 10;
-    const int nbrx_nc = 20;
+    this->gradient_version_ = this->table_version_;
     const int ntype = cell.ntype;
-    if(PARAM.inp.nspin!=4) 
-    {
-        this->tab_dq.create(ntype, nbrx, PARAM.globalv.nqx);
-    }
-    else 
-    {
-        this->tab_dq.create(ntype, nbrx_nc, PARAM.globalv.nqx);
-    }
+    this->tab_dq.create(ntype, this->tab.getBound2(), this->tab.getBound3());
     gradvkb.create(3, nkb, this->wfcpw->npwk_max);
 
     const double pref = ModuleBase::FOUR_PI / sqrt(cell.omega);
@@ -39,7 +39,7 @@ void pseudopot_cell_vnl::initgradq_vnl(const UnitCell &cell)
         for (int ib = 0;ib < nbeta;ib++)
         {
             const int l = cell.atoms[it].ncpp.lll[ib];
-            for (int iq=0; iq<PARAM.globalv.nqx; iq++)  
+            for (int iq=0; iq<this->tab_dq.getBound3(); iq++)
             {
                 const double q = iq * PARAM.globalv.dq;
                 ModuleBase::Sphbes::dSpherical_Bessel_dx(kkbeta, cell.atoms[it].ncpp.r.data(), q, l, djl.data());
@@ -115,9 +115,9 @@ void pseudopot_cell_vnl::getgradq_vnl(const UnitCell& ucell,
                 {
                     const double gnorm = gk[ig].norm() * ucell.tpiba;
                     vq [ig] = ModuleBase::PolyInt::Polynomial_Interpolation(
-                            this->tab, it, nb, PARAM.globalv.nqx, PARAM.globalv.dq, gnorm );
+                            this->tab, it, nb, this->tab.getBound3(), PARAM.globalv.dq, gnorm );
                     dvq[ig] =ModuleBase::PolyInt::Polynomial_Interpolation(
-                            this->tab_dq, it, nb, PARAM.globalv.nqx, PARAM.globalv.dq, gnorm );
+                            this->tab_dq, it, nb, this->tab_dq.getBound3(), PARAM.globalv.dq, gnorm );
                 }
                 nb0 = nb;
             }
@@ -186,4 +186,132 @@ void pseudopot_cell_vnl::getgradq_vnl(const UnitCell& ucell,
     ModuleBase::timer::end("pp_cell_vnl","getvnl");
 
     return;
+}
+
+// ====================================================================
+// getgradq_vnl_td:
+// Calculate the gradient of nonlocal pseudopotential projectors in
+// velocity gauge: gradient_p beta(p), where p = k + G + A(t).
+// ====================================================================
+void pseudopot_cell_vnl::getgradq_vnl_td(const UnitCell& ucell, const int ik, const ModuleBase::Vector3<double>& vector_potential) const
+{
+    ModuleBase::timer::start("pp_cell_vnl", "getgradq_vnl_td");
+
+    if (this->lmaxkb < 0)
+    {
+        ModuleBase::timer::end("pp_cell_vnl", "getgradq_vnl_td");
+        return;
+    }
+
+    const int npw = this->wfcpw->npwk[ik];
+    ModuleBase::realArray projector_gradient(3, this->nhm, npw);
+    std::vector<double> radial_value(npw);
+    std::vector<double> radial_derivative(npw);
+
+    const int ylm_count = (this->lmaxkb + 1) * (this->lmaxkb + 1);
+    ModuleBase::matrix ylm(ylm_count, npw);
+    std::vector<ModuleBase::matrix> ylm_gradient(3);
+    for (int direction = 0; direction < 3; ++direction)
+    {
+        ylm_gradient[direction].create(ylm_count, npw);
+    }
+
+    const ModuleBase::Vector3<double> reduced_vector_potential = vector_potential / ucell.tpiba;
+    std::vector<ModuleBase::Vector3<double>> shifted_gk(npw);
+    for (int ig = 0; ig < npw; ++ig)
+    {
+        shifted_gk[ig] = this->wfcpw->getgpluskcar(ik, ig) + reduced_vector_potential;
+    }
+
+    ModuleBase::YlmReal::grad_Ylm_Real(ylm_count, npw, shifted_gk.data(), ylm, ylm_gradient[0], ylm_gradient[1], ylm_gradient[2]);
+
+    if (this->gradvkb.ptr == nullptr && this->nkb > 0 && this->wfcpw->npwk_max > 0)
+    {
+        this->gradvkb.create(3, this->nkb, this->wfcpw->npwk_max);
+    }
+
+    static const double l1_direction[9] = {0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0};
+    int projector_index = 0;
+    for (int it = 0; it < ucell.ntype; ++it)
+    {
+        const int projector_count = ucell.atoms[it].ncpp.nh;
+        int previous_beta = -1;
+        for (int projector = 0; projector < projector_count; ++projector)
+        {
+            const int beta = static_cast<int>(this->indv(it, projector));
+            if (beta != previous_beta)
+            {
+                for (int ig = 0; ig < npw; ++ig)
+                {
+                    const double momentum_norm = shifted_gk[ig].norm() * ucell.tpiba;
+                    this->check_vnl_range(momentum_norm, PARAM.globalv.dq, true);
+                    radial_value[ig] = ModuleBase::PolyInt::Polynomial_Interpolation(this->tab,
+                                                                                     it,
+                                                                                     beta,
+                                                                                     this->tab.getBound3(),
+                                                                                     PARAM.globalv.dq,
+                                                                                     momentum_norm);
+                    radial_derivative[ig] = ModuleBase::PolyInt::Polynomial_Interpolation(this->tab_dq,
+                                                                                          it,
+                                                                                          beta,
+                                                                                          this->tab_dq.getBound3(),
+                                                                                          PARAM.globalv.dq,
+                                                                                          momentum_norm);
+                }
+                previous_beta = beta;
+            }
+
+            const int lm = static_cast<int>(this->nhtolm(it, projector));
+            for (int direction = 0; direction < 3; ++direction)
+            {
+                for (int ig = 0; ig < npw; ++ig)
+                {
+                    const ModuleBase::Vector3<double>& momentum = shifted_gk[ig];
+                    const double reduced_norm = momentum.norm();
+                    if (reduced_norm < 1.0e-8)
+                    {
+                        if (lm == 0 || lm > 3)
+                        {
+                            projector_gradient(direction, projector, ig) = 0.0;
+                        }
+                        else
+                        {
+                            projector_gradient(direction, projector, ig)
+                                = radial_derivative[ig] * std::sqrt(3.0 / (4.0 * M_PI)) * l1_direction[(lm - 1) * 3 + direction];
+                        }
+                    }
+                    else
+                    {
+                        projector_gradient(direction, projector, ig)
+                            = ylm(lm, ig) * radial_derivative[ig] * momentum[direction] / reduced_norm
+                              + ylm_gradient[direction](lm, ig) * radial_value[ig] / this->wfcpw->tpiba;
+                    }
+                }
+            }
+        }
+
+        for (int ia = 0; ia < ucell.atoms[it].na; ++ia)
+        {
+            // The atom-dependent A phase cancels between the two projectors in
+            // each same-atom nonlocal outer product, so use the static factor.
+            std::complex<double>* structure_factor = this->psf->get_sk(ik, it, ia, this->wfcpw);
+
+            for (int projector = 0; projector < projector_count; ++projector)
+            {
+                const std::complex<double> angular_phase = std::pow(ModuleBase::NEG_IMAG_UNIT, this->nhtol(it, projector));
+                for (int direction = 0; direction < 3; ++direction)
+                {
+                    std::complex<double>* output = &this->gradvkb(direction, projector_index, 0);
+                    for (int ig = 0; ig < npw; ++ig)
+                    {
+                        output[ig] = projector_gradient(direction, projector, ig) * structure_factor[ig] * angular_phase;
+                    }
+                }
+                ++projector_index;
+            }
+            delete[] structure_factor;
+        }
+    }
+
+    ModuleBase::timer::end("pp_cell_vnl", "getgradq_vnl_td");
 }

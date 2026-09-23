@@ -15,7 +15,7 @@ namespace ModuleIO
 void ctrl_iter_pw(const int istep, 
         const int iter, 
         const double &conv_esolver,
-        psi::Psi<std::complex<double>, base_device::DEVICE_CPU>* psi,
+        Setup_Psi_pw& stp,
         const K_Vectors &kv,
         const ModulePW::PW_Basis_K *pw_wfc,
         const Input_para& inp);

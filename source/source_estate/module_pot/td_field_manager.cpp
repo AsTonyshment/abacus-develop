@@ -136,6 +136,62 @@ void TDFieldManager::advance_vector_gauge()
     }
 }
 
+void TDFieldManager::prepare_pw_step(const int step)
+{
+    if (gauge_ != 1 || step != current_step_ + 1)
+    {
+        ModuleBase::WARNING_QUIT("TDFieldManager::prepare_pw_step", "Invalid PW velocity-gauge step sequence.");
+    }
+    pw_midpoint_ = vector_potential_;
+    vector_potential_laststep_.set(0.0, 0.0, 0.0);
+    const int interval = step - 1;
+    if (step > 0 && enabled_ && interval >= start_step_ && interval <= end_step_)
+    {
+        for (const TDField& field : fields_)
+        {
+            // Each half has an even number of Simpson subintervals. Integrate
+            // the half interval itself: A(mid) is not generally (A(left)+A(right))/2.
+            const int half_nodes = field.subdivisions();
+            const int subdivisions = 2 * half_nodes;
+            const double integration_dt = dt_ / subdivisions;
+            std::vector<double> samples(subdivisions + 1);
+            for (int node = 0; node <= subdivisions; ++node)
+            {
+                const double time = (interval + static_cast<double>(node) / subdivisions) * dt_;
+                samples[node] = field.electric_field(TDFieldSample(interval, node, subdivisions, time));
+            }
+            double half_integral = 0.0;
+            double full_integral = 0.0;
+            ModuleBase::Integral::Simpson_Integral(half_nodes + 1, samples.data(), integration_dt, half_integral);
+            ModuleBase::Integral::Simpson_Integral(subdivisions + 1, samples.data(), integration_dt, full_integral);
+            pw_midpoint_[field.direction()] -= half_integral;
+            vector_potential_laststep_[field.direction()] -= full_integral;
+        }
+        vector_potential_ = vector_potential_ + vector_potential_laststep_;
+    }
+
+    // Observables and field output are labelled by the endpoint time n*dt.
+    current_step_ = step;
+    active_ = enabled_ && step >= start_step_ && step <= end_step_;
+    std::fill(field_values_.begin(), field_values_.end(), 0.0);
+    electric_field_.set(0.0, 0.0, 0.0);
+    total_electric_field_.set(0.0, 0.0, 0.0);
+    if (active_)
+    {
+        for (std::size_t index = 0; index < fields_.size(); ++index)
+        {
+            const TDField& field = fields_[index];
+            field_values_[index] = field.electric_field(TDFieldSample(step, 0, field.subdivisions(), step * dt_));
+            total_electric_field_[field.direction()] += field_values_[index];
+        }
+    }
+}
+
+const ModuleBase::Vector3<double>& TDFieldManager::pw_midpoint() const
+{
+    return pw_midpoint_;
+}
+
 void TDFieldManager::read_restart(const std::string& file_dir)
 {
     std::ifstream file((file_dir + "Restart_td.txt").c_str());

@@ -23,7 +23,7 @@
 void ModuleIO::ctrl_iter_pw(const int istep,
                             const int iter,
                             const double& conv_esolver,
-                            psi::Psi<std::complex<double>, base_device::DEVICE_CPU>* psi,
+                            Setup_Psi_pw& stp,
                             const K_Vectors& kv,
                             const ModulePW::PW_Basis_K* pw_wfc,
                             const Input_para& inp)
@@ -57,8 +57,9 @@ void ModuleIO::ctrl_iter_pw(const int istep,
         out_wfc_flag = true;
     }
 
-    if (out_wfc_flag)
+    if (out_wfc_flag && (inp.out_wfc_pw == 1 || inp.out_wfc_pw == 2))
     {
+        stp.sync_cpu();
         ModuleIO::write_wfc_pw(istep_in,
                                iter_in,
                                GlobalV::KPAR,
@@ -72,7 +73,7 @@ void ModuleIO::ctrl_iter_pw(const int istep,
                                inp.out_wfc_pw,
                                inp.ecutwfc,
                                PARAM.globalv.global_out_dir,
-                               psi[0],
+                               stp.psi_cpu[0],
                                kv,
                                pw_wfc,
                                GlobalV::ofs_running);
@@ -100,8 +101,12 @@ void ModuleIO::ctrl_scf_pw(const int istep,
     ModuleBase::TITLE("ModuleIO", "ctrl_scf_pw");
     ModuleBase::timer::start("ModuleIO", "ctrl_scf_pw");
 
-    // Transfer data from device (GPU) to host (CPU) in pw basis
-    stp.copy_d2h();
+    // Only the following postprocessors consume the double CPU mirror.
+    if (inp.calculation == "nscf"
+        && (inp.towannier90 || (berryphase::berry_phase_flag && ModuleSymmetry::Symmetry::symm_flag != 1)))
+    {
+        stp.sync_cpu();
+    }
 
     //----------------------------------------------------------
     //! 4) Compute density of states (DOS)
@@ -278,6 +283,7 @@ void ModuleIO::ctrl_runner_pw(UnitCell& ucell,
         // ! Print out overlap matrices
         if (inp.out_spillage <= 2)
         {
+            stp.sync_cpu();
             for (int i = 0; i < inp.bessel_nao_rcuts.size(); i++)
             {
                 if (GlobalV::MY_RANK == 0)

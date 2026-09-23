@@ -2,11 +2,16 @@
 
 list(APPEND objects
     hamilt_pw.cpp
+    td_history_pw.cpp
+    td_pw.cpp
     op_pw_ekin.cpp
+    op_pw_ekin_td.cpp
     op_pw_veff.cpp
     op_pw_nl.cpp
+    op_pw_nl_td.cpp
     op_pw_meta.cpp
     op_pw_vel.cpp
+    op_pw_vel_td.cpp
     op_pw.cpp
     op_pw_proj.cpp
     op_pw_exx.cpp
@@ -50,6 +55,7 @@ list(APPEND objects
     vnl_pw_grad.cpp
     vnl_pw_init_vnl.cpp
     vnl_pw_qrad.cpp
+  vnl_pw_table.cpp
     stru_fac.cpp
     stru_fac_k.cpp
     soc.cpp

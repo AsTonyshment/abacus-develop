@@ -50,6 +50,9 @@ class H_TDDFT_pw : public PotBase
      */
     static void sync_compatibility_state(const TDFieldManager& manager);
 
+    /** @brief Synchronize mirrors using an explicitly selected vector potential. */
+    static void sync_compatibility_state(const TDFieldManager& manager, const ModuleBase::Vector3<double>& vector_potential);
+
     /**
      * @brief Compute ionic force of electric field.
      *
@@ -61,7 +64,7 @@ class H_TDDFT_pw : public PotBase
     /** @brief Legacy mirror of the spatial-gauge selector. */
     static int stype;
 
-    /** @brief Legacy mirror of the midpoint vector potential. */
+    /** @brief Legacy mirror of the vector potential selected for the current operation. */
     static ModuleBase::Vector3<double> At;
 
     /** @brief Legacy mirror of the current vector-potential increment. */

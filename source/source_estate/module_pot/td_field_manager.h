@@ -34,6 +34,16 @@ class TDFieldManager
     void advance_vector_gauge();
 
     /**
+     * @brief Prepare PW endpoint n and the preceding propagation midpoint.
+     * @note Step zero only samples the initial field. For n > 0 the integrated
+     * interval is [(n-1)*dt, n*dt], gated by its left endpoint step number.
+     */
+    void prepare_pw_step(const int step);
+
+    /** @brief Return the PW propagation midpoint in internal field units. */
+    const ModuleBase::Vector3<double>& pw_midpoint() const;
+
+    /**
      * @brief Restore the electronic step and vector-potential state.
      *
      * @param file_dir Directory containing `Restart_td.txt`.
@@ -64,7 +74,7 @@ class TDFieldManager
     /** @brief Return per-occurrence field samples for the current step. */
     const std::vector<double>& field_values() const;
 
-    /** @brief Return the midpoint vector potential in propagation units. */
+    /** @brief Return the legacy midpoint, or the endpoint prepared by prepare_pw_step. */
     const ModuleBase::Vector3<double>& vector_potential() const;
 
     /** @brief Return the integrated vector-potential change for this step. */
@@ -99,6 +109,7 @@ class TDFieldManager
     std::vector<double> field_values_;
     ModuleBase::Vector3<double> vector_potential_;
     ModuleBase::Vector3<double> vector_potential_laststep_;
+    ModuleBase::Vector3<double> pw_midpoint_;
     ModuleBase::Vector3<double> electric_field_;
     ModuleBase::Vector3<double> total_electric_field_;
 

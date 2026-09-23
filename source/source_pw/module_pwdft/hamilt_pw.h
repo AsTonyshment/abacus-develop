@@ -40,6 +40,11 @@ class HamiltPW : public Hamilt<T, Device>
     // for target K point, update consequence of hPsi() and matrix()
     void updateHk(const int ik) override;
 
+    /** @brief Bind non-owning local-potential buffers until the next explicit binding.
+     *  @note The caller must keep the buffers alive and restore endpoint potentials after propagation.
+     */
+    void bind_local_pot(const Real* veff, const Real* vofk);
+
     void sPsi(const T* psi_in, // psi
               T* spsi,         // spsi
               const int nrow,  // dimension of spsi: nbands * nrow

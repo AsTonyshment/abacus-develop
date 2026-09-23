@@ -1,9 +1,11 @@
 #include "hamilt_pw.h"
 
 #include "op_pw_ekin.h"
+#include "op_pw_ekin_td.h"
 #include "op_pw_exx.h"
 #include "op_pw_meta.h"
 #include "op_pw_nl.h"
+#include "op_pw_nl_td.h"
 #include "op_pw_proj.h"
 #include "op_pw_veff.h"
 #include "source_base/global_function.h"
@@ -48,6 +50,21 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
         {
             this->ops->add(ekinetic);
         }
+
+        // Add the velocity-gauge kinetic correction 2*A*p + A^2.
+        if (PARAM.inp.esolver_type == "tddft" && PARAM.inp.td_stype == 1)
+        {
+            Operator<T, Device>* td_ekinetic = new TDEkineticPW<T, Device>(wfc_basis, tpiba);
+
+            if (this->ops == nullptr)
+            {
+                this->ops = td_ekinetic;
+            }
+            else
+            {
+                this->ops->add(td_ekinetic);
+            }
+        }
     }
     if (PARAM.inp.vl_in_h)
     {
@@ -73,6 +90,10 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
         if (PARAM.inp.gate_flag)
         {
             pot_register_in.push_back("gatefield");
+        }
+        if (PARAM.inp.esolver_type == "tddft")
+        {
+            pot_register_in.push_back("tddft");
         }
         if (PARAM.inp.ml_exx) // sunliang
         {
@@ -112,7 +133,19 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
     }
     if (PARAM.inp.vnl_in_h)
     {
-        Operator<T, Device>* nonlocal = new Nonlocal<OperatorPW<T, Device>>(isk, this->ppcell, ucell, wfc_basis);
+        Operator<T, Device>* nonlocal = nullptr;
+
+        // Use vector-potential-shifted projectors in the velocity gauge.
+        if (PARAM.inp.esolver_type == "tddft" && PARAM.inp.td_stype == 1)
+        {
+            nonlocal = new TDNonlocalPW<T, Device>(isk, this->ppcell, ucell, wfc_basis);
+        }
+        else
+        {
+            // Ground-state and length-gauge calculations use the standard operator.
+            nonlocal = new Nonlocal<OperatorPW<T, Device>>(isk, this->ppcell, ucell, wfc_basis);
+        }
+
         if (this->ops == nullptr)
         {
             this->ops = nonlocal;
@@ -156,6 +189,24 @@ HamiltPW<T, Device>::~HamiltPW()
     if (this->ops != nullptr)
     {
         delete this->ops;
+    }
+}
+
+template <typename T, typename Device>
+void HamiltPW<T, Device>::bind_local_pot(const Real* veff, const Real* vofk)
+{
+    Operator<T, Device>* op = this->ops;
+    while (op != nullptr)
+    {
+        if (op->get_cal_type() == calculation_type::pw_veff)
+        {
+            static_cast<Veff<OperatorPW<T, Device>>*>(op)->set_veff(veff);
+        }
+        else if (op->get_cal_type() == calculation_type::pw_meta)
+        {
+            static_cast<Meta<OperatorPW<T, Device>>*>(op)->set_vk(vofk);
+        }
+        op = op->next_op;
     }
 }
 

@@ -18,7 +18,7 @@
  * - ctor / dtor / release_memory(): device buffer cleanup
  * - init(): allocate and wire vkb, tab, tab_at, deeq, qq_nt/qq_so, nhtol etc.
  * - print_vnl(): dump tab to stream
- * - rescale_vnl(): rescale tab/tab_at/qrad when the cell volume changes
+ * - rescale_vnl(): rescale tab/tab_dq/tab_at/qrad when the cell volume changes
  * - get_*_data<T>() template specializations for CPU/GPU typed pointer access
  *
  * Heavy logic (getvnl, init_vnl, qrad, deeq, alpha channel) lives in:
@@ -320,6 +320,9 @@ void pseudopot_cell_vnl::print_vnl(std::ofstream& ofs)
 // scale the non-local pseudopotential tables
 void pseudopot_cell_vnl::rescale_vnl(const double& omega_in)
 {
+    const bool gradient_current = this->gradient_version_ == this->table_version_;
+    ++this->table_version_;
+    if (gradient_current) { this->gradient_version_ = this->table_version_; }
     const double ratio = this->omega_old / omega_in;
     const double sqrt_ratio = std::sqrt(ratio);
     this->omega_old = omega_in;
@@ -327,6 +330,10 @@ void pseudopot_cell_vnl::rescale_vnl(const double& omega_in)
     for (int i = 0; i < this->tab.getSize(); i++)
     {
         this->tab.ptr[i] *= sqrt_ratio;
+    }
+    for (int i = 0; i < this->tab_dq.getSize(); ++i)
+    {
+        this->tab_dq.ptr[i] *= sqrt_ratio;
     }
     for (int i = 0; i < this->tab_at.getSize(); i++)
     {

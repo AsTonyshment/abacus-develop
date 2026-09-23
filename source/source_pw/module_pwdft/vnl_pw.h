@@ -40,16 +40,54 @@ class pseudopot_cell_vnl
 
     void rescale_vnl(const double& omega_in);
 
+    /** @brief Ensure four-point interpolation covers qmax (inverse Bohr), without changing dq. */
+    void ensure_vnl_range(const UnitCell& cell, const double& qmax, const double& dq);
+
+    /** @brief Reject non-finite or out-of-range radial interpolation arguments before reading. */
+    void check_vnl_range(const double& q, const double& dq, const bool& derivative) const;
+
     template <typename FPTYPE, typename Device>
     void getvnl(Device* ctx, const UnitCell& ucell, const int& ik, std::complex<FPTYPE>* vkb_in) const;
+
+    /**
+     * @brief Build nonlocal projectors on the velocity-gauge shifted momentum grid.
+     *
+     * @param ctx Device context.
+     * @param ucell Unit cell defining reciprocal-space units.
+     * @param ik K-point index.
+     * @param vector_potential Vector potential in Hartree atomic units.
+     * @param vkb_in Output projector buffer.
+     */
+    template <typename FPTYPE, typename Device>
+    void getvnl_td(Device* ctx,
+                   const UnitCell& ucell,
+                   const int& ik,
+                   const ModuleBase::Vector3<double>& vector_potential,
+                   std::complex<FPTYPE>* vkb_in) const;
 
     // void getvnl_alpha(const int &ik);
 
     void init_vnl_alpha(const UnitCell& cell);
 
     void initgradq_vnl(const UnitCell& cell);
+    /** @brief Generation of radial tables, including volume rescaling. */
+    size_t table_version() const { return table_version_; }
+    /** @brief Prepare the derivative table only when the radial table changed. */
+    void ensure_grad_table(const UnitCell& cell);
+
 
     void getgradq_vnl(const UnitCell& ucell, const int ik);
+
+    /**
+     * @brief Build nonlocal-projector gradients on the shifted momentum grid.
+     *
+     * @param ucell Unit cell defining reciprocal-space units.
+     * @param ik K-point index.
+     * @param vector_potential Vector potential in Hartree atomic units.
+     */
+    void getgradq_vnl_td(const UnitCell& ucell,
+                         const int ik,
+                         const ModuleBase::Vector3<double>& vector_potential) const;
 
     //===============================================================
     // MEMBER VARIABLES :
@@ -61,6 +99,10 @@ class pseudopot_cell_vnl
     //===============================================================
     // private:
 
+  private:
+    size_t table_version_ = 1;
+    size_t gradient_version_ = 0;
+  public:
     int nhm = 0;
     int nbetam = 0; // max number of beta functions
 
@@ -214,6 +256,12 @@ class pseudopot_cell_vnl
 
     double omega_old = 0;
     bool use_gpu_ = false;
+
+    /** @brief Fill the allocated radial projector table using the original Bessel quadrature. */
+    void fill_vnl_table(const UnitCell& cell, const double& dq);
+
+    /** @brief Refresh aliases and allocated precision/device copies after radial-table changes. */
+    void sync_vnl_table();
 
     /**
      * @brief Compute interpolation table qrad

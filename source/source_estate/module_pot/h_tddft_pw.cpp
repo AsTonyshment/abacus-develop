@@ -34,8 +34,13 @@ H_TDDFT_pw::H_TDDFT_pw(const ModulePW::PW_Basis* rho_basis_in,
 
 void H_TDDFT_pw::sync_compatibility_state(const TDFieldManager& manager)
 {
+    sync_compatibility_state(manager, manager.vector_potential());
+}
+
+void H_TDDFT_pw::sync_compatibility_state(const TDFieldManager& manager, const ModuleBase::Vector3<double>& vector_potential)
+{
     stype = manager.gauge();
-    At = manager.vector_potential();
+    At = vector_potential;
     At_laststep = manager.vector_potential_laststep();
     Et = manager.electric_field();
     const ModuleBase::Vector3<double>& total_field = manager.total_electric_field();
