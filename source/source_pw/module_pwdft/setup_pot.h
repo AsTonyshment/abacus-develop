@@ -27,6 +27,7 @@ void setup_pot(const int istep,
         Plus_U_Base &dftu, // mohan add 2025-11-06
         VSep* vsep_cell, // U-1/2 method
         psi::Psi<T, Device>* kspw_psi, // electronic wave functions
+        psi::Psi<std::complex<double>, Device>* onsite_psi, // persistent double-precision mirror
         hamilt::HamiltBase* p_hamilt, // hamiltonian
         ModulePW::PW_Basis_K *pw_wfc,  // pw for wfc
         const ModulePW::PW_Basis *pw_rhod, // pw for rhod

@@ -4,6 +4,8 @@ list(APPEND objects
     hamilt_pw.cpp
     td_history_pw.cpp
     td_pw.cpp
+    td_vel_pw.cpp
+    td_spin_pw.cpp
     op_pw_ekin.cpp
     op_pw_ekin_td.cpp
     op_pw_veff.cpp
