@@ -491,7 +491,8 @@ void ESolver_KS_PW<T, Device>::cal_force(BaseCell& basecell, ModuleBase::matrix&
     this->stp.update_psi_d();
 
     // Calculate forces
-    ff.cal_force(this->inp_->nspin,
+    ff.cal_force(this->inp_->esolver_type,
+                 this->inp_->nspin,
                  PARAM.globalv.domag,
                  PARAM.globalv.domag_z,
                  this->inp_->gga_grad,
