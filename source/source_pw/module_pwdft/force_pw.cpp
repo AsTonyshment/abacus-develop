@@ -1,15 +1,11 @@
 #include "force_pw.h"
 
-#include "source_base/global_variable.h"
-#include "source_base/parallel_reduce.h"
-#include "source_io/module_output/output_log.h"
-#include "source_io/module_parameter/parameter.h"
-#include "source_pw/module_pwdft/kernels/force_op.h"
-// new
 #include "source_base/complexmatrix.h"
+#include "source_base/global_variable.h"
 #include "source_base/libm/libm.h"
 #include "source_base/math_integral.h"
 #include "source_base/mathzone.h"
+#include "source_base/parallel_reduce.h"
 #include "source_base/timer.h"
 #include "source_base/tool_quit.h"
 #include "source_base/tool_threading.h"
@@ -20,39 +16,43 @@
 #include "source_hamilt/module_ewald/h_ewald_pw.h"
 #include "source_hamilt/module_surchem/surchem.h"
 #include "source_hamilt/module_vdw/vdw.h"
+#include "source_io/module_output/output_log.h"
+#include "source_io/module_parameter/parameter.h"
+#include "source_pw/module_pwdft/kernels/force_op.h"
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
 template <typename FPTYPE, typename Device>
-void Forces<FPTYPE, Device>::cal_force(const std::string& esolver_type,
-                                       const int nspin,
-                                       const bool domag,
-                                       const bool domag_z,
-                                       const int gga_grad,
-                                       const bool use_onsite_projection,
-                                       UnitCell& ucell,
-                                       ModuleBase::matrix& force,
-                                       const vdw::VdwResult* vdw_result,
-                                       const elecstate::ElecState& elec,
-                                       const ModulePW::PW_Basis* const rho_basis,
-                                       ModuleSymmetry::Symmetry* p_symm,
-                                       Structure_Factor* p_sf,
-                                       surchem& solvent,
-                                       const Plus_U_Base* p_dftu,
-                                       const pseudopot_cell_vl* locpp,
-                                       const pseudopot_cell_vnl* p_nlpp,
-                                       K_Vectors* pkv,
-                                       ModulePW::PW_Basis_K* wfc_basis,
-                                       const psi::Psi<std::complex<FPTYPE>, Device>* psi_in)
+void Forces<FPTYPE, Device>::cal_force(
+    const std::string &esolver_type,
+    const int nspin,
+    const bool domag,
+    const bool domag_z,
+    const int gga_grad,
+    const bool use_onsite_projection,
+    UnitCell &ucell,
+    ModuleBase::matrix &force,
+    const vdw::VdwResult *vdw_result,
+    const elecstate::ElecState &elec,
+    const ModulePW::PW_Basis *const rho_basis,
+    ModuleSymmetry::Symmetry *p_symm,
+    Structure_Factor *p_sf,
+    surchem &solvent,
+    const Plus_U_Base *p_dftu,
+    const pseudopot_cell_vl *locpp,
+    const pseudopot_cell_vnl *p_nlpp,
+    K_Vectors *pkv,
+    ModulePW::PW_Basis_K *wfc_basis,
+    const psi::Psi<std::complex<FPTYPE>, Device> *psi_in)
 {
     ModuleBase::timer::start("Forces", "cal_force");
     ModuleBase::TITLE("Forces", "init");
     this->device = base_device::get_device_type(this->ctx);
-    const ModuleBase::matrix& wg = elec.wg;
-    const ModuleBase::matrix& ekb = elec.ekb;
-    const Charge* const chr = elec.charge;
+    const ModuleBase::matrix &wg = elec.wg;
+    const ModuleBase::matrix &ekb = elec.ekb;
+    const Charge *const chr = elec.charge;
     force.create(nat, 3);
 
     ModuleBase::matrix forcelc(nat, 3);
@@ -170,8 +170,8 @@ void Forces<FPTYPE, Device>::cal_force(const std::string& esolver_type,
         {
             for (int ia = 0; ia < ucell.atoms[it].na; ia++)
             {
-                force(iat, ipol) = forcelc(iat, ipol) + forceion(iat, ipol) + forcenl(iat, ipol) + forcecc(iat, ipol) + forcescc(iat, ipol)
-                                   + forcepcc(iat, ipol);
+                force(iat, ipol) = forcelc(iat, ipol) + forceion(iat, ipol) + forcenl(iat, ipol) + forcecc(iat, ipol) +
+                                   forcescc(iat, ipol) + forcepcc(iat, ipol);
 
                 if (vdw_result != nullptr) // linpz and jiyy added vdw force, modified by zhengdy
                 {
@@ -283,16 +283,17 @@ void Forces<FPTYPE, Device>::cal_force(const std::string& esolver_type,
 }
 
 template <typename FPTYPE, typename Device>
-void Forces<FPTYPE, Device>::cal_force_loc(const UnitCell& ucell,
-                                           ModuleBase::matrix& forcelc,
-                                           const ModulePW::PW_Basis* const rho_basis,
-                                           const ModuleBase::matrix& vloc,
-                                           const Charge* const chr)
+void Forces<FPTYPE, Device>::cal_force_loc(
+    const UnitCell &ucell,
+    ModuleBase::matrix &forcelc,
+    const ModulePW::PW_Basis *const rho_basis,
+    const ModuleBase::matrix &vloc,
+    const Charge *const chr)
 {
     ModuleBase::TITLE("Forces", "cal_force_loc");
     ModuleBase::timer::start("Forces", "cal_force_loc");
     this->device = base_device::get_device_type(this->ctx);
-    std::complex<double>* aux = new std::complex<double>[rho_basis->nmaxgr];
+    std::complex<double> *aux = new std::complex<double>[rho_basis->nmaxgr];
     // now, in all pools , the charge are the same,
     // so, the force calculated by each pool is equal.
 
@@ -352,13 +353,13 @@ void Forces<FPTYPE, Device>::cal_force_loc(const UnitCell& ucell,
             gcar_h[ig * 3 + 2] = rho_basis->gcar[ig].z;
         }
 
-        int* iat2it_d = nullptr;
-        int* ig2gg_d = nullptr;
-        double* gcar_d = nullptr;
-        double* tau_d = nullptr;
-        std::complex<double>* aux_d = nullptr;
-        double* forcelc_d = nullptr;
-        double* vloc_d = nullptr;
+        int *iat2it_d = nullptr;
+        int *ig2gg_d = nullptr;
+        double *gcar_d = nullptr;
+        double *tau_d = nullptr;
+        std::complex<double> *aux_d = nullptr;
+        double *forcelc_d = nullptr;
+        double *vloc_d = nullptr;
 
         resmem_int_op()(iat2it_d, this->nat);
         resmem_int_op()(ig2gg_d, rho_basis->npw);
@@ -376,17 +377,8 @@ void Forces<FPTYPE, Device>::cal_force_loc(const UnitCell& ucell,
         syncmem_var_h2d_op()(forcelc_d, forcelc.c, this->nat * 3);
         syncmem_var_h2d_op()(vloc_d, vloc.c, vloc.nr * vloc.nc);
 
-        hamilt::cal_force_loc_op<FPTYPE, Device>()(this->nat,
-                                                   rho_basis->npw,
-                                                   ucell.tpiba * ucell.omega,
-                                                   iat2it_d,
-                                                   ig2gg_d,
-                                                   gcar_d,
-                                                   tau_d,
-                                                   aux_d,
-                                                   vloc_d,
-                                                   vloc.nc,
-                                                   forcelc_d);
+        hamilt::cal_force_loc_op<FPTYPE, Device>()(
+            this->nat, rho_basis->npw, ucell.tpiba * ucell.omega, iat2it_d, ig2gg_d, gcar_d, tau_d, aux_d, vloc_d, vloc.nc, forcelc_d);
         syncmem_var_d2h_op()(forcelc.c, forcelc_d, this->nat * 3);
 
         delmem_int_op()(iat2it_d);
@@ -430,10 +422,11 @@ void Forces<FPTYPE, Device>::cal_force_loc(const UnitCell& ucell,
 }
 
 template <typename FPTYPE, typename Device>
-void Forces<FPTYPE, Device>::cal_force_ew(const UnitCell& ucell,
-                                          ModuleBase::matrix& forceion,
-                                          const ModulePW::PW_Basis* const rho_basis,
-                                          const Structure_Factor* p_sf)
+void Forces<FPTYPE, Device>::cal_force_ew(
+    const UnitCell &ucell,
+    ModuleBase::matrix &forceion,
+    const ModulePW::PW_Basis *const rho_basis,
+    const Structure_Factor *p_sf)
 {
     ModuleBase::TITLE("Forces", "cal_force_ew");
     ModuleBase::timer::start("Forces", "cal_force_ew");
@@ -497,8 +490,8 @@ void Forces<FPTYPE, Device>::cal_force_ew(const UnitCell& ucell,
         {
             ModuleBase::WARNING_QUIT("ewald", "Can't find optimal alpha.");
         }
-        upperbound = 2.0 * charge * charge * sqrt(2.0 * alpha / ModuleBase::TWO_PI)
-                     * ModuleBase::truncated_erfc(sqrt(ucell.tpiba2 * rho_basis->ggecut / 4.0 / alpha));
+        upperbound = 2.0 * charge * charge * sqrt(2.0 * alpha / ModuleBase::TWO_PI) *
+                     ModuleBase::truncated_erfc(sqrt(ucell.tpiba2 * rho_basis->ggecut / 4.0 / alpha));
     } while (upperbound > 1.0e-6);
     const int ig0 = rho_basis->ig_gge0;
 #pragma omp parallel for
@@ -540,12 +533,12 @@ void Forces<FPTYPE, Device>::cal_force_ew(const UnitCell& ucell,
             it_fact_h[it] = ucell.atoms[it].ncpp.zv * ModuleBase::e2 * ucell.tpiba * ModuleBase::TWO_PI / ucell.omega * fact;
         }
 
-        int* iat2it_d = nullptr;
-        double* gcar_d = nullptr;
-        double* tau_d = nullptr;
-        double* it_fact_d = nullptr;
-        std::complex<double>* aux_d = nullptr;
-        double* forceion_d = nullptr;
+        int *iat2it_d = nullptr;
+        double *gcar_d = nullptr;
+        double *tau_d = nullptr;
+        double *it_fact_d = nullptr;
+        std::complex<double> *aux_d = nullptr;
+        double *forceion_d = nullptr;
         resmem_int_op()(iat2it_d, this->nat);
         resmem_var_op()(gcar_d, rho_basis->npw * 3);
         resmem_var_op()(tau_d, this->nat * 3);
@@ -560,15 +553,8 @@ void Forces<FPTYPE, Device>::cal_force_ew(const UnitCell& ucell,
         syncmem_complex_h2d_op()(aux_d, aux.data(), rho_basis->npw);
         syncmem_var_h2d_op()(forceion_d, forceion.c, this->nat * 3);
 
-        hamilt::cal_force_ew_op<FPTYPE, Device>()(this->nat,
-                                                  rho_basis->npw,
-                                                  rho_basis->ig_gge0,
-                                                  iat2it_d,
-                                                  gcar_d,
-                                                  tau_d,
-                                                  it_fact_d,
-                                                  aux_d,
-                                                  forceion_d);
+        hamilt::cal_force_ew_op<FPTYPE, Device>()(
+            this->nat, rho_basis->npw, rho_basis->ig_gge0, iat2it_d, gcar_d, tau_d, it_fact_d, aux_d, forceion_d);
 
         syncmem_var_d2h_op()(forceion.c, forceion_d, this->nat * 3);
         delmem_int_op()(iat2it_d);
@@ -638,16 +624,8 @@ void Forces<FPTYPE, Device>::cal_force_ew(const UnitCell& ucell,
                     if (iat1 != iat2)
                     {
                         ModuleBase::Vector3<double> d_tau = ucell.atoms[T1].tau[I1] - ucell.atoms[T2].tau[I2];
-                        H_Ewald_pw::rgen(d_tau,
-                                         rmax,
-                                         irr.data(),
-                                         ucell.latvec,
-                                         ucell.G,
-                                         r.data(),
-                                         r2.data(),
-                                         mxr,
-                                         nrm,
-                                         PARAM.inp.test_energy);
+                        H_Ewald_pw::rgen(
+                            d_tau, rmax, irr.data(), ucell.latvec, ucell.G, r.data(), r2.data(), mxr, nrm, PARAM.inp.test_energy);
 
                         for (int n = 0; n < nrm; n++)
                         {
@@ -655,8 +633,8 @@ void Forces<FPTYPE, Device>::cal_force_ew(const UnitCell& ucell,
 
                             double factor = 0.0;
                             {
-                                factor = ucell.atoms[T1].ncpp.zv * ucell.atoms[T2].ncpp.zv * ModuleBase::e2 / (rr * rr)
-                                         * (erfc(sqa * rr) / rr + sq8a_2pi * ModuleBase::libm::exp(-alpha * rr * rr)) * ucell.lat0;
+                                factor = ucell.atoms[T1].ncpp.zv * ucell.atoms[T2].ncpp.zv * ModuleBase::e2 / (rr * rr) *
+                                         (erfc(sqa * rr) / rr + sq8a_2pi * ModuleBase::libm::exp(-alpha * rr * rr)) * ucell.lat0;
                             }
                             forceion(iat1, 0) -= factor * r[n].x;
                             forceion(iat1, 1) -= factor * r[n].y;
