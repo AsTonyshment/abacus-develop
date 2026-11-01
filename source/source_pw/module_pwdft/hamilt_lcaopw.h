@@ -19,7 +19,8 @@ namespace hamilt
                 K_Vectors* p_kv,
                 pseudopot_cell_vnl* nlpp,
                 const UnitCell* ucell)
-          : HamiltPW<T, base_device::DEVICE_CPU>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr){};
+          // nonlocal_field is only used by RT-TDDFT velocity gauge.
+          : HamiltPW<T, base_device::DEVICE_CPU>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr, true){};
 #ifdef __EXX
       HamiltLIP(elecstate::Potential* pot_in,
                 ModulePW::PW_Basis_K* wfc_basis,
@@ -27,7 +28,8 @@ namespace hamilt
                 pseudopot_cell_vnl* nlpp,
                 const UnitCell* ucell,
                 Exx_Lip<T>& exx_lip_in)
-          : HamiltPW<T, base_device::DEVICE_CPU>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr),
+          // nonlocal_field is only used by RT-TDDFT velocity gauge.
+          : HamiltPW<T, base_device::DEVICE_CPU>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr, true),
             exx_lip(exx_lip_in){};
       Exx_Lip<T>& exx_lip;
 #endif

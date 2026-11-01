@@ -38,7 +38,9 @@ void Nonlocal<OperatorPW<T, Device>>::init(const int ik_in)
     // Calculate nonlocal pseudopotential vkb
     if (this->ppcell->nkb > 0) // xiaohui add 2013-09-02. Attention...
     {
-        this->ppcell->getvnl(this->ctx, *this->ucell, this->ik, ModuleBase::Vector3<double>(0.0, 0.0, 0.0), this->vkb);
+        // nonlocal_a is only needed by RT-TDDFT
+        const ModuleBase::Vector3<double> nonlocal_a{0.0, 0.0, 0.0};
+        this->ppcell->getvnl(this->ctx, *this->ucell, this->ik, nonlocal_a, this->vkb, this->wfcpw->npwk_max);
     }
 
     if (this->next_op != nullptr)

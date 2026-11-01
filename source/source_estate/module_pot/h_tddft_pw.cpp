@@ -1,6 +1,8 @@
 #include "h_tddft_pw.h"
 
 #include "source_base/timer.h"
+#include "source_base/parallel_reduce.h"
+#include "source_estate/module_charge/charge.h"
 #include "source_base/tool_quit.h"
 #include "td_field_manager.h"
 
@@ -52,6 +54,46 @@ void H_TDDFT_pw::cal_fixed_v(double* vl_pseudo)
     ModuleBase::timer::end("H_TDDFT_pw", "cal_fixed_v");
 }
 
+void H_TDDFT_pw::field_energy(const Charge& charge, double& electronic, double& ionic)
+{
+    ModuleBase::timer::start("H_TDDFT_pw", "field_energy");
+    electronic = 0.0;
+    ionic = 0.0;
+    if (field_manager_->gauge() != 0 || !field_manager_->active())
+    {
+        ModuleBase::timer::end("H_TDDFT_pw", "field_energy");
+        return;
+    }
+    std::vector<double> potential(this->rho_basis_->nrxx, 0.0);
+    cal_fixed_v(potential.data());
+    const int density_spins = charge.nspin == 2 ? 2 : 1;
+    for (int spin = 0; spin < density_spins; ++spin)
+    {
+        for (int ir = 0; ir < this->rho_basis_->nrxx; ++ir)
+        {
+            electronic += charge.rho[spin][ir] * potential[ir];
+        }
+    }
+    Parallel_Reduce::reduce_pool(electronic);
+    electronic *= this->ucell_->omega / this->rho_basis_->nxyz;
+    const ModuleBase::Vector3<double>& electric = field_manager_->efield_ha();
+    for (int type = 0; type < this->ucell_->ntype; ++type)
+    {
+        const Atom& atoms = this->ucell_->atoms[type];
+        for (int atom = 0; atom < atoms.na; ++atom)
+        {
+            ModuleBase::Vector3<double> position;
+            for (int d = 0; d < 3; ++d)
+            {
+                position[d] = cal_v_space_length_potential(atoms.taud[atom][d]);
+            }
+            const ModuleBase::Vector3<double> cartesian = position * this->ucell_->latvec;
+            ionic -= 2.0 * atoms.ncpp.zv * (electric * cartesian);
+        }
+    }
+    ModuleBase::timer::end("H_TDDFT_pw", "field_energy");
+}
+
 void H_TDDFT_pw::cal_v_space_length(std::vector<double>& vext_space, const int direction)
 {
     ModuleBase::TITLE("H_TDDFT_pw", "cal_v_space_length");
@@ -93,6 +135,10 @@ double H_TDDFT_pw::cal_v_space_length_potential(const double coordinate) const
 {
     const double lower_cut = field_manager_->length_cut1();
     const double upper_cut = field_manager_->length_cut2();
+    if (lower_cut == 0.0 && upper_cut == 1.0)
+    {
+        return coordinate * this->ucell_->lat0;
+    }
     if (coordinate < lower_cut)
     {
         return -((coordinate - lower_cut) * (upper_cut - lower_cut) / (lower_cut + 1.0 - upper_cut) - lower_cut) * this->ucell_->lat0;
@@ -104,11 +150,10 @@ double H_TDDFT_pw::cal_v_space_length_potential(const double coordinate) const
     return -((coordinate - upper_cut) * (upper_cut - lower_cut) / (lower_cut + 1.0 - upper_cut) - upper_cut) * this->ucell_->lat0;
 }
 
-void H_TDDFT_pw::compute_force(const UnitCell& cell, const TDFieldManager& manager, ModuleBase::matrix& force)
+void H_TDDFT_pw::compute_force(const UnitCell& cell, const ModuleBase::Vector3<double>& electric, ModuleBase::matrix& force)
 {
-    // Velocity gauge has no scalar electric-field force. Forces use Rydberg units.
-    const double ry_scale = manager.gauge() == 1 ? 0.0 : 2.0;
-    const ModuleBase::Vector3<double> field = manager.efield_ha() * ry_scale;
+    // Convert Z * electric from Hartree/Bohr to Ry/Bohr: 1 Hartree = 2 Ry.
+    const ModuleBase::Vector3<double> field = electric * 2.0;
     int atom_index = 0;
     for (int type = 0; type < cell.ntype; ++type)
     {

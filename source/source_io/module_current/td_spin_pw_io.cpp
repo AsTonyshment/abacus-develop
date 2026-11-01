@@ -3,6 +3,7 @@
 #include "source_base/tool_quit.h"
 
 #include <cmath>
+#include <cstddef>
 #include <fstream>
 #include <iomanip>
 #include <limits.h>
@@ -13,7 +14,11 @@ namespace ModuleIO
 {
 namespace
 {
-std::ofstream open_series(const std::string& path, int step, const std::string& header, std::ostream& log)
+std::ofstream open_series(
+    const std::string &path,
+    int step,
+    const std::string &header,
+    std::ostream &log)
 {
     const std::ios::openmode mode = step == 0 ? std::ios::out : std::ios::app;
     std::ofstream output(path.c_str(), mode);
@@ -30,12 +35,12 @@ std::ofstream open_series(const std::string& path, int step, const std::string& 
         {
             full_path = std::string(cwd) + "/" + path;
         }
-        log << "Write file: " << full_path << '\n';
+        log << " Write file: " << full_path << '\n';
     }
     return output;
 }
 
-void finish_series(std::ofstream* output)
+void finish_series(std::ofstream *output)
 {
     output->flush();
     if (!output->good())
@@ -44,16 +49,20 @@ void finish_series(std::ofstream* output)
     }
 }
 
-void write_endpoint(std::ostream& output, int step, double time_fs)
+void write_endpoint(std::ostream &output, int step, double time_fs)
 {
     // Internal step zero is the initial state at time zero, displayed as step one.
     output << std::right << std::setw(6) << step + 1 << "  " << std::fixed << std::setprecision(6) << std::setw(10) << time_fs;
     output << std::scientific << std::setprecision(12);
 }
 
-void write_atoms(std::ofstream* output, int step, double time, const std::vector<double>& values)
+void write_atoms(
+    std::ofstream *output,
+    int step,
+    double time,
+    const std::vector<double> &values)
 {
-    for (size_t atom = 0; atom < values.size() / 3; ++atom)
+    for (std::size_t atom = 0; atom < values.size() / 3; ++atom)
     {
         write_endpoint(*output, step, time);
         *output << "  " << std::setw(6) << atom + 1;
@@ -67,18 +76,19 @@ void write_atoms(std::ofstream* output, int step, double time, const std::vector
 }
 } // namespace
 
-void write_td_spin_pw(const std::string& directory,
-                      int step,
-                      double time_fs,
-                      const std::vector<std::string>& orbitals,
-                      const std::string& mag_partition,
-                      const std::string& orbital_dir,
-                      double onsite_radius,
-                      bool calc_torque,
-                      bool spin_current,
-                      const pw::TDSpinResultPW& spin,
-                      const pw::TDVelResultPW& current,
-                      std::ostream& log)
+void write_td_spin_pw(
+    const std::string &directory,
+    int step,
+    double time_fs,
+    const std::vector<std::string> &orbitals,
+    const std::string &mag_partition,
+    const std::string &orbital_dir,
+    double onsite_radius,
+    bool calc_torque,
+    bool spin_current,
+    const pw::TDSpinResultPW &spin,
+    const pw::TDVelResultPW &current,
+    std::ostream &log)
 {
     if (mag_partition != "none")
     {
@@ -95,14 +105,14 @@ void write_td_spin_pw(const std::string& directory,
         }
         std::ostringstream total_columns;
         total_columns << std::left << std::setw(6) << "#step" << "  " << std::right << std::setw(10) << "time_fs";
-        for (const char* label: {"Mx", "My", "Mz", "M_norm", "M_abs_integral", "N_elec"})
+        for (const char *label : {"Mx", "My", "Mz", "M_norm", "M_abs_integral", "N_elec"})
         {
             total_columns << "  " << std::setw(19) << label;
         }
         std::ostringstream atom_columns;
         atom_columns << std::left << std::setw(6) << "#step" << "  " << std::right << std::setw(10) << "time_fs"
                      << "  " << std::setw(6) << "atom";
-        for (const char* label: {"Mx", "My", "Mz"})
+        for (const char *label : {"Mx", "My", "Mz"})
         {
             atom_columns << "  " << std::setw(19) << label;
         }
@@ -114,7 +124,7 @@ void write_td_spin_pw(const std::string& directory,
         std::ofstream atoms = open_series(atom_path, step, atom_header, log);
         write_endpoint(total, step, time_fs);
         double norm = 0.0;
-        for (double value: spin.mag)
+        for (double value : spin.mag)
         {
             total << "  " << std::setw(19) << value;
             norm += value * value;
@@ -128,31 +138,31 @@ void write_td_spin_pw(const std::string& directory,
     {
         std::ostringstream total_columns;
         total_columns << std::left << std::setw(6) << "#step" << "  " << std::right << std::setw(10) << "time_fs";
-        for (const char* label: {"tau_xc_x", "tau_xc_y", "tau_xc_z", "tau_soc_x", "tau_soc_y", "tau_soc_z"})
+        for (const char *label : {"tau_xc_x", "tau_xc_y", "tau_xc_z", "tau_soc_x", "tau_soc_y", "tau_soc_z"})
         {
             total_columns << "  " << std::setw(19) << label;
         }
         std::ostringstream atom_columns;
         atom_columns << std::left << std::setw(6) << "#step" << "  " << std::right << std::setw(10) << "time_fs"
                      << "  " << std::setw(6) << "atom";
-        for (const char* label: {"tau_soc_x", "tau_soc_y", "tau_soc_z"})
+        for (const char *label : {"tau_soc_x", "tau_soc_y", "tau_soc_z"})
         {
             atom_columns << "  " << std::setw(19) << label;
         }
         const std::string total_header = "# torque=dS/dt; S=M/2; unit=hbar/Hartree_atomic_time\n" + total_columns.str();
         const std::string atom_header = "# SOC_pseudopotential_atom_decomposition; unit=hbar/Hartree_atomic_time\n"
-                                        "# not_the_derivative_of_atomic_moments\n"
-                                        + atom_columns.str();
+                                        "# not_the_derivative_of_atomic_moments\n" +
+                                        atom_columns.str();
         const std::string total_path = directory + "torque_tot.txt";
         const std::string atom_path = directory + "torque_atom.txt";
         std::ofstream total = open_series(total_path, step, total_header, log);
         std::ofstream atoms = open_series(atom_path, step, atom_header, log);
         write_endpoint(total, step, time_fs);
-        for (double value: spin.xc)
+        for (double value : spin.xc)
         {
             total << "  " << std::setw(19) << value;
         }
-        for (double value: spin.soc)
+        for (double value : spin.soc)
         {
             total << "  " << std::setw(19) << value;
         }
@@ -164,7 +174,7 @@ void write_td_spin_pw(const std::string& directory,
     {
         std::ostringstream columns;
         columns << std::left << std::setw(6) << "#step" << "  " << std::right << std::setw(10) << "time_fs";
-        for (const char* label: {"Jxx", "Jxy", "Jxz", "Jyx", "Jyy", "Jyz", "Jzx", "Jzy", "Jzz"})
+        for (const char *label : {"Jxx", "Jxy", "Jxz", "Jyx", "Jyy", "Jyz", "Jzx", "Jzy", "Jzz"})
         {
             columns << "  " << std::setw(19) << label;
         }
@@ -172,7 +182,7 @@ void write_td_spin_pw(const std::string& directory,
         const std::string path = directory + "spincur_tot.txt";
         std::ofstream output = open_series(path, step, header, log);
         write_endpoint(output, step, time_fs);
-        for (double value: current.spin)
+        for (double value : current.spin)
         {
             output << "  " << std::setw(19) << value;
         }

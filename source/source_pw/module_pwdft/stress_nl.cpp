@@ -44,6 +44,8 @@ void Stress_Func<FPTYPE, Device>::stress_nl(ModuleBase::matrix& sigma,
     hamilt::FS_Nonlocal_tools<FPTYPE, Device> nl_tools(&nlpp_in, &ucell_in, p_kv, wfc_basis, p_sf, wg, &ekb);
 
     const int max_nbands = wg.nc;
+    // nonlocal_a is only needed by RT-TDDFT
+    const ModuleBase::Vector3<double> nonlocal_a{0.0, 0.0, 0.0};
     for (int ik = 0; ik < nks; ik++) // loop k points
     {
         // skip zero weights to speed up
@@ -58,7 +60,7 @@ void Stress_Func<FPTYPE, Device>::stress_nl(ModuleBase::matrix& sigma,
         }
         const int npm = nbands_occ;
 
-        nl_tools.cal_vkb(ik, max_nbands);
+        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a);
         // calculate becp = <psi|beta> for all beta functions
         nl_tools.cal_becp(ik, npm, &psi_in[0](ik,0,0));
         nl_tools.reduce_pool_becp(max_nbands);

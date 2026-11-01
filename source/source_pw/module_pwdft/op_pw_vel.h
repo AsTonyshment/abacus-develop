@@ -27,9 +27,14 @@ class Velocity
 
     ~Velocity();
 
+    /** @brief Refresh momentum and projectors at zero field. */
     void init(const int ik_in);
-    /** @brief Refresh momentum and projectors with a Hartree-unit vector potential. */
-    void init(const int ik_in, const ModuleBase::Vector3<double>& vector_potential);
+    /**
+     * @brief Bind RT-TDDFT momentum shifts independently, in Hartree atomic units.
+     * @param kinetic_a Vector potential entering the kinetic velocity.
+     * @param nonlocal_a Momentum shift of the projectors entering the nonlocal velocity commutator.
+     */
+    void init(int ik, const ModuleBase::Vector3<double>& kinetic_a, const ModuleBase::Vector3<double>& nonlocal_a);
 
     /**
      * @brief calculate \hat{v}|\psi>

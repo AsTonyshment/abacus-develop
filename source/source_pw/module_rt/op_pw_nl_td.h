@@ -13,35 +13,45 @@ class TDNonlocalPW : public OperatorPW<T, Device>
 {
   public:
     /** @brief Bind the vector potential in Hartree atomic units before init(). */
-    void set_A_ha(const ModuleBase::Vector3<double>& A)
+    void set_A_ha(const ModuleBase::Vector3<double> &A)
     {
-        A_ha_ = A;
+        if (nonlocal_field_)
+        {
+            A_ha_ = A;
+        }
     }
-    TDNonlocalPW(const int* isk_in, const pseudopot_cell_vnl* ppcell_in, const UnitCell* ucell_in, const ModulePW::PW_Basis_K* wfc_basis);
+    TDNonlocalPW(
+        const int *isk_in,
+        const pseudopot_cell_vnl *ppcell_in,
+        const UnitCell *ucell_in,
+        const ModulePW::PW_Basis_K *wfc_basis,
+        bool nonlocal_field);
 
     virtual ~TDNonlocalPW();
     virtual void init(const int ik_in) override;
 
-    virtual void act(const int nbands,
-                     const int nbasis,
-                     const int npol,
-                     const T* tmpsi_in,
-                     T* tmhpsi,
-                     const int ngk_ik = 0,
-                     const bool is_first_node = false) const override;
+    virtual void act(
+        const int nbands,
+        const int nbasis,
+        const int npol,
+        const T *tmpsi_in,
+        T *tmhpsi,
+        const int ngk_ik = 0,
+        const bool is_first_node = false) const override;
 
   private:
+    const bool nonlocal_field_;
     mutable NonlocalWorkspace<T, Device> workspace_;
 
-    const int* isk = nullptr;
-    const pseudopot_cell_vnl* ppcell = nullptr;
-    const UnitCell* ucell = nullptr;
-    const ModulePW::PW_Basis_K* wfcpw = nullptr;
+    const int *isk = nullptr;
+    const pseudopot_cell_vnl *ppcell = nullptr;
+    const UnitCell *ucell = nullptr;
+    const ModulePW::PW_Basis_K *wfcpw = nullptr;
 
-    mutable T* vkb_td = nullptr; // Time-dependent projector cache.
+    mutable T *vkb_td = nullptr; // Time-dependent projector cache.
 
-    ModuleBase::Vector3<double> A_ha_;
-    Device* ctx = {};
+    ModuleBase::Vector3<double> A_ha_{0.0, 0.0, 0.0};
+    Device *ctx = {};
     using resmem_complex_op = base_device::memory::resize_memory_op<T, Device>;
     using delmem_complex_op = base_device::memory::delete_memory_op<T, Device>;
 };

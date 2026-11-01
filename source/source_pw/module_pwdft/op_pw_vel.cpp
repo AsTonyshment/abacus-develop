@@ -52,11 +52,15 @@ Velocity<FPTYPE, Device>::~Velocity()
 template <typename FPTYPE, typename Device>
 void Velocity<FPTYPE, Device>::init(const int ik_in)
 {
-    this->init(ik_in, ModuleBase::Vector3<double>(0.0, 0.0, 0.0));
+    // The kinetic and nonlocal vector potential arguments are only needed by RT-TDDFT.
+    const ModuleBase::Vector3<double> zero{0.0, 0.0, 0.0};
+    this->init(ik_in, zero, zero);
 }
 
 template <typename FPTYPE, typename Device>
-void Velocity<FPTYPE, Device>::init(const int ik_in, const ModuleBase::Vector3<double>& vector_potential)
+void Velocity<FPTYPE, Device>::init(const int ik_in,
+                                    const ModuleBase::Vector3<double>& vector_potential,
+                                    const ModuleBase::Vector3<double>& nonlocal_a)
 {
     ModuleBase::timer::start("Velocity", "init");
     this->ik = ik_in;
@@ -99,8 +103,9 @@ void Velocity<FPTYPE, Device>::init(const int ik_in, const ModuleBase::Vector3<d
             resmem_complex_op()(gradvkb_, gradient_elements);
             projector_capacity_ = projector_elements;
         }
-        this->ppcell->getvnl(this->ctx, *this->ucell, ik_in, vector_potential, vkb_);
-        this->gradient_.calculate(this->ppcell, *this->ucell, *this->wfcpw, ik_in, vector_potential, gradvkb_);
+        // RT-TDDFT selects the nonlocal momentum shift independently of the kinetic shift.
+        this->ppcell->getvnl(this->ctx, *this->ucell, ik_in, nonlocal_a, vkb_, npwk_max);
+        this->gradient_.calculate(this->ppcell, *this->ucell, *this->wfcpw, ik_in, nonlocal_a, gradvkb_);
     }
     ModuleBase::timer::end("Velocity", "init");
 }

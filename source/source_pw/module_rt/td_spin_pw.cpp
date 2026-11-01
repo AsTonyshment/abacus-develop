@@ -15,7 +15,7 @@ namespace pw
 {
 namespace
 {
-double image_dist(const ModuleBase::Vector3<double>& delta, const ModuleBase::Matrix3& lattice, const std::array<double, 3>& inverse_norm)
+double image_dist(const ModuleBase::Vector3<double> &delta, const ModuleBase::Matrix3 &lattice, const std::array<double, 3> &inverse_norm)
 {
     ModuleBase::Vector3<double> nearest;
     for (int a = 0; a < 3; ++a)
@@ -49,13 +49,12 @@ double image_dist(const ModuleBase::Vector3<double>& delta, const ModuleBase::Ma
 }
 } // namespace
 
-std::vector<int> td_voronoi_pw(const UnitCell& cell, const ModulePW::PW_Basis& grid)
+std::vector<int> td_voronoi_pw(const UnitCell &cell, const ModulePW::PW_Basis &grid)
 {
     const ModuleBase::Matrix3 inverse = cell.latvec.Inverse();
-    const std::array<double, 3> inverse_norm{
-        {std::sqrt(inverse.e11 * inverse.e11 + inverse.e21 * inverse.e21 + inverse.e31 * inverse.e31),
-         std::sqrt(inverse.e12 * inverse.e12 + inverse.e22 * inverse.e22 + inverse.e32 * inverse.e32),
-         std::sqrt(inverse.e13 * inverse.e13 + inverse.e23 * inverse.e23 + inverse.e33 * inverse.e33)}};
+    const std::array<double, 3> inverse_norm{{std::sqrt(inverse.e11 * inverse.e11 + inverse.e21 * inverse.e21 + inverse.e31 * inverse.e31),
+        std::sqrt(inverse.e12 * inverse.e12 + inverse.e22 * inverse.e22 + inverse.e32 * inverse.e32),
+        std::sqrt(inverse.e13 * inverse.e13 + inverse.e23 * inverse.e23 + inverse.e33 * inverse.e33)}};
     std::vector<ModuleBase::Vector3<double>> atoms;
     for (int it = 0; it < cell.ntype; ++it)
     {
@@ -88,16 +87,17 @@ std::vector<int> td_voronoi_pw(const UnitCell& cell, const ModulePW::PW_Basis& g
 }
 
 template <typename Real, typename Device>
-void TDSpinPW<Real, Device>::initialize(const UnitCell& cell,
-                                        const ModulePW::PW_Basis& grid,
-                                        const ModulePW::PW_Basis_K& basis,
-                                        const K_Vectors& kv,
-                                        Structure_Factor& sf,
-                                        pseudopot_cell_vnl& pp,
-                                        const std::string& mag_partition,
-                                        const std::string& orbital_dir,
-                                        double onsite_radius,
-                                        bool calc_torque)
+void TDSpinPW<Real, Device>::initialize(
+    const UnitCell &cell,
+    const ModulePW::PW_Basis &grid,
+    const ModulePW::PW_Basis_K &basis,
+    const K_Vectors &kv,
+    Structure_Factor &sf,
+    pseudopot_cell_vnl &pp,
+    const std::string &mag_partition,
+    const std::string &orbital_dir,
+    double onsite_radius,
+    bool calc_torque)
 {
     if (cell_ != nullptr || cell.get_npol() != 2)
     {
@@ -152,18 +152,18 @@ void TDSpinPW<Real, Device>::sync_positions()
 }
 
 template <typename Real, typename Device>
-void TDSpinPW<Real, Device>::density(const elecstate::ElecState& state, TDSpinResultPW* result)
+void TDSpinPW<Real, Device>::density(const elecstate::ElecState &state, TDSpinResultPW *result)
 {
-    const UnitCell& cell = *cell_;
-    const ModulePW::PW_Basis& grid = *grid_;
+    const UnitCell &cell = *cell_;
+    const ModulePW::PW_Basis &grid = *grid_;
     const bool voronoi = mag_partition_ == "voronoi";
     if (voronoi && labels_.size() != static_cast<size_t>(grid.nrxx))
     {
         labels_ = td_voronoi_pw(cell, grid);
     }
     const double volume = cell.omega / grid.nxyz;
-    const double* const* rho = state.charge->rho;
-    const ModuleBase::matrix& potential = state.pot->get_eff_v();
+    const double *const *rho = state.charge->rho;
+    const ModuleBase::matrix &potential = state.pot->get_eff_v();
     double totals[8] = {};
     if (voronoi)
     {
@@ -209,14 +209,15 @@ void TDSpinPW<Real, Device>::density(const elecstate::ElecState& state, TDSpinRe
 }
 
 template <typename Real, typename Device>
-void TDSpinPW<Real, Device>::soc(const psi::Psi<Complex, Device>& psi,
-                                 const ModuleBase::matrix& weights,
-                                 const ModuleBase::Vector3<double>& a,
-                                 TDSpinResultPW* result)
+void TDSpinPW<Real, Device>::soc(
+    const psi::Psi<Complex, Device> &psi,
+    const ModuleBase::matrix &weights,
+    const ModuleBase::Vector3<double> &a,
+    TDSpinResultPW *result)
 {
-    const UnitCell& cell = *cell_;
-    const ModulePW::PW_Basis_K& basis = *basis_;
-    pseudopot_cell_vnl& pp = *pp_;
+    const UnitCell &cell = *cell_;
+    const ModulePW::PW_Basis_K &basis = *basis_;
+    pseudopot_cell_vnl &pp = *pp_;
     result->atom_soc.assign(3 * cell.nat, 0.0);
     if (pp.nkb == 0)
     {
@@ -234,18 +235,18 @@ void TDSpinPW<Real, Device>::soc(const psi::Psi<Complex, Device>& psi,
     {
         beta_ = ct::Tensor(ct::DataTypeToEnum<Complex>::value, device, {size});
     }
-    Complex* beta = beta_.template data<Complex>();
+    Complex *beta = beta_.template data<Complex>();
     const size_t count = static_cast<size_t>(pp.nkb) * ncols;
     projections_.resize(count);
     contracted_.resize(count);
-    Device* context = nullptr;
+    Device *context = nullptr;
     for (int ik = 0; ik < basis.nks; ++ik)
     {
         psi.fix_k(ik);
         const int npw = basis.npwk[ik];
         if (npw > 0)
         {
-            pp.getvnl(context, cell, ik, a, beta);
+            pp.getvnl(context, cell, ik, a, beta, basis.npwk_max);
         }
         nonlocal_.project_contract(cell, pp, basis, 0, ncols, ld_psi, 2, npw, beta, psi.get_pointer());
         if (basis.poolrank != 0)
@@ -253,12 +254,10 @@ void TDSpinPW<Real, Device>::soc(const psi::Psi<Complex, Device>& psi,
             // B and DB already contain the full pool sum; count each k-point contribution only once.
             continue;
         }
-        base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>()(projections_.data(),
-                                                                                               nonlocal_.projections(),
-                                                                                               count);
-        base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>()(contracted_.data(),
-                                                                                               nonlocal_.contracted(),
-                                                                                               count);
+        base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>()(
+            projections_.data(), nonlocal_.projections(), count);
+        base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>()(
+            contracted_.data(), nonlocal_.contracted(), count);
         int offset = 0;
         int atom = 0;
         const Complex imaginary(0, 1);
@@ -297,15 +296,16 @@ void TDSpinPW<Real, Device>::soc(const psi::Psi<Complex, Device>& psi,
 }
 
 template <typename Real, typename Device>
-void TDSpinPW<Real, Device>::onsite(const psi::Psi<Complex, Device>& psi,
-                                    const elecstate::ElecState& state,
-                                    const ModuleBase::Vector3<double>& a,
-                                    TDSpinResultPW* result)
+void TDSpinPW<Real, Device>::onsite(
+    const psi::Psi<Complex, Device> &psi,
+    const elecstate::ElecState &state,
+    const ModuleBase::Vector3<double> &a,
+    TDSpinResultPW *result)
 {
-    const UnitCell& cell = *cell_;
-    const ModulePW::PW_Basis_K& basis = *basis_;
-    const K_Vectors& kv = *kv_;
-    Structure_Factor& sf = *sf_;
+    const UnitCell &cell = *cell_;
+    const ModulePW::PW_Basis_K &basis = *basis_;
+    const K_Vectors &kv = *kv_;
+    Structure_Factor &sf = *sf_;
     // Onsite owns its atomic result; the independently integrated total moment remains unchanged.
     result->atom_mag.assign(3 * cell.nat, 0.0);
     const double dq = pp_->table_dq();
@@ -321,7 +321,7 @@ void TDSpinPW<Real, Device>::onsite(const psi::Psi<Complex, Device>& psi,
         const int nq = static_cast<int>(std::ceil(q_bound_ / dq)) + 4;
         onsite_projector_->init(orbital_dir_, &cell, *onsite_psi_, kv, basis, sf, onsite_radius_, nq, dq, state.wg, state.ekb);
     }
-    projectors::OnsiteProjector<double, Device>* projector = onsite_projector_.get();
+    projectors::OnsiteProjector<double, Device> *projector = onsite_projector_.get();
     if (onsite_psi_->get_nbands() != nbands || onsite_psi_->get_nbasis() != ld_psi)
     {
         ModuleBase::WARNING_QUIT("TDSpinPW", "The onsite wavefunction layout changed after initialization.");
@@ -334,7 +334,7 @@ void TDSpinPW<Real, Device>::onsite(const psi::Psi<Complex, Device>& psi,
     for (int ik = 0; ik < basis.nks; ++ik)
     {
         psi.fix_k(ik);
-        OnsiteValue* converted = onsite_psi_->get_pointer();
+        OnsiteValue *converted = onsite_psi_->get_pointer();
         if (size > 0)
         {
             // Onsite projections use double precision, so float spinors require a value conversion, not a pointer cast.
@@ -347,7 +347,7 @@ void TDSpinPW<Real, Device>::onsite(const psi::Psi<Complex, Device>& psi,
             // Overlaps are replicated after the pool reduction; count each occupied orbital only once.
             continue;
         }
-        const OnsiteValue* b = projector->get_h_becp();
+        const OnsiteValue *b = projector->get_h_becp();
         int offset = 0;
         for (int atom = 0; atom < cell.nat; ++atom)
         {
@@ -373,9 +373,11 @@ void TDSpinPW<Real, Device>::onsite(const psi::Psi<Complex, Device>& psi,
 }
 
 template <typename Real, typename Device>
-TDSpinResultPW TDSpinPW<Real, Device>::calculate(const psi::Psi<Complex, Device>& psi,
-                                                 const elecstate::ElecState& state,
-                                                 const ModuleBase::Vector3<double>& a)
+TDSpinResultPW TDSpinPW<Real, Device>::calculate(
+    const psi::Psi<Complex, Device> &psi,
+    const elecstate::ElecState &state,
+    const ModuleBase::Vector3<double> &a,
+    const ModuleBase::Vector3<double> &nonlocal_a)
 {
     ModuleBase::timer::start("TDSpinPW", "calculate");
     if (cell_ == nullptr)
@@ -396,7 +398,7 @@ TDSpinResultPW TDSpinPW<Real, Device>::calculate(const psi::Psi<Complex, Device>
     }
     if (calc_torque_)
     {
-        soc(psi, state.wg, a, &result);
+        soc(psi, state.wg, nonlocal_a, &result);
     }
     // Observable evaluation must preserve the caller's k-point cursor.
     psi.fix_k(old_k);

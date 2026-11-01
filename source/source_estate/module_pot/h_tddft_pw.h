@@ -41,15 +41,17 @@ class H_TDDFT_pw : public PotBase
      * @param vl_pseudo Real-space fixed potential updated in place.
      */
     void cal_fixed_v(double* vl_pseudo) override;
+    /** @brief Electronic and ionic scalar field energies in Ry, at the bound endpoint. */
+    void field_energy(const Charge& charge, double& electronic, double& ionic);
 
     /**
-     * @brief Compute ionic force of electric field.
+     * @brief Compute the direct ionic electric-field force.
      *
-     * @param[in] cell Information of cell.
-     * @param[in] manager Current field state owned by the RT solver.
-     * @param[out] fe Electric-field force, F = qE.
+     * @param[in] cell Unit cell containing the ionic valence charges.
+     * @param[in] electric Electric field in Hartree atomic units.
+     * @param[out] force Preallocated nat-by-3 matrix overwritten with forces in Ry/Bohr.
      */
-    static void compute_force(const UnitCell& cell, const TDFieldManager& manager, ModuleBase::matrix& fe);
+    static void compute_force(const UnitCell& cell, const ModuleBase::Vector3<double>& electric, ModuleBase::matrix& force);
 
   private:
     void cal_v_space_length(std::vector<double>& vext_space, int direction);

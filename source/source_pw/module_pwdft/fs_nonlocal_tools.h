@@ -40,10 +40,10 @@ class FS_Nonlocal_tools
     ~FS_Nonlocal_tools();
 
     /**
-     * @brief calculate the projectors |beta>
-     * 
+     * @brief Build projectors with a Hartree-unit momentum shift and a compact npw stride.
+     * @param a RT-TDDFT nonlocal momentum shift; zero for ground-state force and stress calculations.
      */
-    void cal_vkb(const int& ik, const int& nbdall);
+    void cal_vkb(const int& ik, const int& nbdall, const ModuleBase::Vector3<double>& a);
 
     /**
      * @brief calculate the becp = <psi|beta> for all beta functions

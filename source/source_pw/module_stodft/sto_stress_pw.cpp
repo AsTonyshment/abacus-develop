@@ -181,6 +181,9 @@ void Sto_Stress_PW<FPTYPE, Device>::sto_stress_nl(ModuleBase::matrix& sigma,
 
     hamilt::FS_Nonlocal_tools<FPTYPE, Device> nl_tools(&nlpp, &ucell, p_kv, wfc_basis, p_sf, wg, nullptr);
 
+    // nonlocal_a is only needed by RT-TDDFT
+    const ModuleBase::Vector3<double> nonlocal_a{0.0, 0.0, 0.0};
+
     for (int ik = 0; ik < p_kv->get_nks(); ik++)
     {
         const int nstobands = nchip[ik];
@@ -188,7 +191,7 @@ void Sto_Stress_PW<FPTYPE, Device>::sto_stress_nl(ModuleBase::matrix& sigma,
         const int npw = wfc_basis->npwk[ik];
         psi_in.fix_k(ik);
         stowf.shchi->fix_k(ik);
-        nl_tools.cal_vkb(ik, max_nbands);
+        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a);
         // calculate becp = <psi|beta> for all beta functions
         nl_tools.cal_becp(ik, nksbands, psi_in.get_pointer(), 0);
         nl_tools.cal_becp(ik, nstobands, stowf.shchi->get_pointer(), nksbands);

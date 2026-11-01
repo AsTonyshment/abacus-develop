@@ -65,6 +65,12 @@ void FS_Nonlocal_tools<FPTYPE, Device>::cal_dbecp_f(const int& ik,
     const int npw = this->wfc_basis_->npwk[ik];
 
     // do gemm to get dbecp and revert the ppcell_vkb for next ipol
+    if (npw == 0)
+    {
+        const int count = npm_npol * this->nkb;
+        base_device::memory::set_memory_op<std::complex<FPTYPE>, Device>()(dbecp_ptr, 0, count);
+        return;
+    }
     const char transa = 'C';
     const char transb = 'N';
     gemm_op()(transa,

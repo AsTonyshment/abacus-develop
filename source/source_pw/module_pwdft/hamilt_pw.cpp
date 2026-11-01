@@ -25,7 +25,8 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
                               pseudopot_cell_vnl* nlpp,
                               Plus_U_Base* p_dftu,
                               const UnitCell* ucell,
-                              const General_Exx_Info* exx_info)
+                              const General_Exx_Info* exx_info,
+                              const bool nonlocal_field)
     : ucell(ucell)
 {
     this->classname = "HamiltPW";
@@ -152,10 +153,10 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
     {
         Operator<T, Device>* nonlocal = nullptr;
 
-        // Use vector-potential-shifted projectors in the velocity gauge.
+        // RT-TDDFT uses nonlocal_field to select vector-potential-shifted projectors in velocity gauge.
         if (velocity_gauge)
         {
-            nonlocal = new TDNonlocalPW<T, Device>(isk, this->ppcell, ucell, wfc_basis);
+            nonlocal = new TDNonlocalPW<T, Device>(isk, this->ppcell, ucell, wfc_basis, nonlocal_field);
         }
         else
         {
@@ -234,7 +235,9 @@ void HamiltPW<T, Device>::bind_td_state(const Real* veff, const ModuleBase::Vect
         {
             TDNonlocalPW<T, Device>* td_nonlocal = dynamic_cast<TDNonlocalPW<T, Device>*>(op);
             if (td_nonlocal != nullptr)
+            {
                 td_nonlocal->set_A_ha(A_ha);
+            }
         }
         op = op->next_op;
     }

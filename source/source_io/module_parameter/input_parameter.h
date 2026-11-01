@@ -333,6 +333,7 @@ struct Input_para
     int lin_maxiter = 500;              ///< maximum iterations per linear solve
     double td_force_dt = 0.02; ///<"fs"
     bool td_vext = false;      ///< add extern potential or not
+    int td_vg_nl = 2; ///< Nonlocal electromagnetic coupling in PW velocity gauge.
     // std::string td_vext_dire = "1";   ///< vext direction
     std::vector<int> td_vext_dire = {1}; ///< vector of vext direction
 

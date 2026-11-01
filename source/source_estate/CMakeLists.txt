@@ -5,6 +5,7 @@ list(
   init_scf.cpp
   estate_e_terms.cpp
   elecstate_energy.cpp
+  td_energy.cpp
   elecstate_exx.cpp
   elecstate_print.cpp
   elecstate_tools.cpp

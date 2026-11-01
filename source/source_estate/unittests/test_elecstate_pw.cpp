@@ -118,7 +118,8 @@ void pseudopot_cell_vnl::getvnl<float, base_device::DEVICE_CPU>(base_device::DEV
                                                                 const UnitCell&,
                                                                 int const&,
                                                                 const ModuleBase::Vector3<double>&,
-                                                                std::complex<float>*) const
+                                                                std::complex<float>*,
+                                                                int) const
 {
 }
 template <>
@@ -126,7 +127,8 @@ void pseudopot_cell_vnl::getvnl<double, base_device::DEVICE_CPU>(base_device::DE
                                                                  const UnitCell&,
                                                                  int const&,
                                                                  const ModuleBase::Vector3<double>&,
-                                                                 std::complex<double>*) const
+                                                                 std::complex<double>*,
+                                                                 int) const
 {
 }
 Soc::~Soc()

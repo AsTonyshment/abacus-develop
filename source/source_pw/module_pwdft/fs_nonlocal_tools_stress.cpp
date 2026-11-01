@@ -36,13 +36,19 @@ void FS_Nonlocal_tools<FPTYPE, Device>::cal_vkb_deri_s(const int& ik,
     std::complex<FPTYPE>* vkb_deri_ptr = this->ppcell_vkb;
 
     if (this->pre_ik_s != ik)
-    { // k point has changed, we need to recalculate the g_plus_k
-        // this->g_plus_k = maths.cal_gk(ik, this->wfc_basis_); //has been calculated by cal_becp
-
+    {
+        // Prepare the zero-field geometry shared by all stress components at this k point.
+        this->g_plus_k = maths.cal_gk(ik, this->wfc_basis_);
+        resmem_complex_op()(this->hd_sk, this->ucell_->nat * npw);
+        this->sf_->get_sk(this->ctx, ik, this->wfc_basis_, this->hd_sk);
         const int lmax_ = this->nlpp_->lmaxkb;
-        // prepare ylm，size: (lmax+1)^2 * this->max_npw
-        // maths.cal_ylm(lmax_, npw, g_plus_k.data(), hd_ylm); //has been calculated by cal_becp
+        maths.cal_ylm(lmax_, npw, g_plus_k.data(), hd_ylm);
         maths.cal_ylm_deri(lmax_, npw, g_plus_k.data(), hd_ylm_deri);
+        if (this->device == base_device::GpuDevice)
+        {
+            syncmem_var_h2d_op()(d_g_plus_k, g_plus_k.data(), g_plus_k.size());
+            syncmem_var_h2d_op()(d_vq_tab, this->nlpp_->tab.ptr, this->nlpp_->tab.getSize());
+        }
         this->pre_ik_s = ik;
     }
     FPTYPE *gk = g_plus_k.data(), *vq_tb = this->nlpp_->tab.ptr;

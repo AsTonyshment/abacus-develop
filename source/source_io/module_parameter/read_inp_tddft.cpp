@@ -174,6 +174,17 @@ void ReadInput::item_rt_tddft()
         item.type = "Boolean";
         item.description = R"(Write wavefunction and density electron counts, their changes from the initial state, and orthogonality errors to the running log after each electronic evolution step. Electron counts describe the end-of-step state; orthogonality errors before and after correction are separate maxima over all SCF iterations and k points within that step. When half-step retries are enabled, only accepted substeps contribute to these maxima. Orthogonality errors are omitted when `td_orthonormal=none`.
 
+The file `OUT.{suffix}/td_energy.txt` records the electronic step, time in fs, and the following energies in Rydberg:
+
+* Material energy: $E_{\mathrm{mat}}=F-E_{\mathrm{sm}}-E_{\mathrm{e,field}}$.
+* Hamilton energy: $\mathcal{H}=F-E_{\mathrm{sm}}+E_{\mathrm{ion,field}}$.
+* Electronic scalar-field energy: $E_{\mathrm{e,field}}=\int_\Omega\rho(\boldsymbol{r},t)V_{\mathrm{ext}}(\boldsymbol{r},t)\,\mathrm{d}\boldsymbol{r}$.
+* Ionic scalar-field energy: $E_{\mathrm{ion,field}}=-\sum_I Z_I V_{\mathrm{ext}}(\boldsymbol{R}_I,t)$.
+
+Here $F$ is the generalized Kohn-Sham free-energy functional including the electronic scalar-field energy and the smearing entropy term $E_{\mathrm{sm}}$. The electron number density is $\rho$, $Z_I$ is the ionic valence charge, and $\boldsymbol{R}_I$ is the ionic position. $V_{\mathrm{ext}}$ is the external scalar potential energy of an electron; for a uniform electric field in the length gauge, $V_{\mathrm{ext}}(\boldsymbol{r},t)=e\boldsymbol{E}(t)\cdot\boldsymbol{r}$, where $e$ is the positive elementary charge.
+
+The scalar external-field coupling is $E_{\mathrm{field}}=E_{\mathrm{e,field}}+E_{\mathrm{ion,field}}$, giving $\mathcal{H}=E_{\mathrm{mat}}+E_{\mathrm{field}}$. In the velocity gauge, $V_{\mathrm{ext}}=0$ and both scalar-field energies vanish. The smearing entropy term is $E_{\mathrm{sm}}=-TS$, with $\sigma=k_{\mathrm{B}}T$, where $\sigma$ is the smearing width and $S$ is the entropy defined by the selected smearing method.
+
 [NOTE] Enabling this output adds density integration and diagnostic communication.)";
         item.default_value = "false";
         item.unit = "";
@@ -512,6 +523,23 @@ For a nonorthogonal LCAO basis:
         this->add_item(item);
     }
     {
+        Input_Item item("td_vg_nl");
+        item.annotation = "nonlocal electromagnetic coupling in PW velocity gauge";
+        item.category = "Real-Time TDDFT (PW)";
+        item.type = "Integer";
+        item.domain.set_choices({"0", "1", "2"});
+        item.description = R"(Controls the vector-potential coupling of the nonlocal pseudopotential in PW RT-TDDFT, $\hat{V}_{\mathrm{NL}}^{\boldsymbol{A}}(t)=\mathrm{e}^{-\mathrm{i}\boldsymbol{A}(t)\cdot\boldsymbol{r}}\hat{V}_{\mathrm{NL}}\mathrm{e}^{\mathrm{i}\boldsymbol{A}(t)\cdot\boldsymbol{r}}$, which shifts the projector momentum argument by $\boldsymbol{A}(t)$.
+
+* `0`: Omit the shift in both the Hamiltonian and the ionic position force.
+* `1`: Include the shift in the Hamiltonian and omit it in the ionic position force.
+* `2`: Include the shift in both, giving the complete electromagnetic coupling.)";
+        item.default_value = "2";
+        item.unit = "";
+        item.set_availability("basis_type==pw and esolver_type==tddft and td_stype==1");
+        read_sync_int(input.td_vg_nl);
+        this->add_item(item);
+    }
+    {
         Input_Item item("td_vext");
         item.annotation = "add extern potential or not";
         item.category = "Real-Time TDDFT (Common)";
@@ -607,7 +635,7 @@ In the velocity and hybrid gauges, ABACUS obtains the vector potential actually 
         item.annotation = "cut1 of interval in length gauge";
         item.category = "Real-Time TDDFT (Common)";
         item.type = "Real";
-        item.description = R"(Lower fractional-coordinate cutoff for the periodic spatial modulation used in the length gauge. Let $c_1=\mathtt{td\_lcut1}$, $c_2=\mathtt{td\_lcut2}$, $D=c_2-c_1$, and $G=c_1+1-c_2$. For a fractional coordinate $x$, the field factor is $\eta(x)=1$ when $c_1\leqslant x\lt c_2$ and $\eta(x)=-D/G$ elsewhere. The reversed outer interval makes the potential periodic and continuous and gives the field zero cell average.)";
+        item.description = R"(Lower fractional-coordinate cutoff for the spatial modulation used in the length gauge. Let $c_1=\mathtt{td\_lcut1}$, $c_2=\mathtt{td\_lcut2}$, $D=c_2-c_1$, and $G=c_1+1-c_2$. For $G\gt 0$, the field factor is $\eta(x)=1$ when $c_1\leqslant x\lt c_2$ and $\eta(x)=-D/G$ elsewhere. The reversed outer interval makes the potential periodic and continuous and gives the field zero cell average.)";
         item.default_value = "0.05";
         item.unit = "";
         read_sync_double(input.td_lcut1);
@@ -618,7 +646,7 @@ In the velocity and hybrid gauges, ABACUS obtains the vector potential actually 
         item.annotation = "cut2 of interval in length gauge";
         item.category = "Real-Time TDDFT (Common)";
         item.type = "Real";
-        item.description = R"(Upper fractional-coordinate cutoff for the periodic spatial modulation used in the length gauge. Let $c_1=\mathtt{td\_lcut1}$, $c_2=\mathtt{td\_lcut2}$, $D=c_2-c_1$, and $G=c_1+1-c_2$. For a fractional coordinate $x$, the field factor is $\eta(x)=1$ when $c_1\leqslant x\lt c_2$ and $\eta(x)=-D/G$ elsewhere. The reversed outer interval makes the potential periodic and continuous and gives the field zero cell average.)";
+        item.description = R"(Upper fractional-coordinate cutoff for the spatial modulation used in the length gauge. See `td_lcut1` for the field profile.)";
         item.default_value = "0.95";
         item.unit = "";
         read_sync_double(input.td_lcut2);

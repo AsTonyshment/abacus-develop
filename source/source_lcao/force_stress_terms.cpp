@@ -82,7 +82,9 @@ void cal_external_field_forces(UnitCell& ucell,
     if (td_field != nullptr)
     {
         parts.fefield_tddft.create(ucell.nat, 3);
-        elecstate::H_TDDFT_pw::compute_force(ucell, *td_field, parts.fefield_tddft);
+        // The direct RT-TDDFT ionic force uses the electric field in both gauges.
+        const ModuleBase::Vector3<double>& electric = td_field->efield_ha();
+        elecstate::H_TDDFT_pw::compute_force(ucell, electric, parts.fefield_tddft);
     }
 
     //! atomic forces from gate field

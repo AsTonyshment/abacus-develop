@@ -11,7 +11,8 @@ StoHamiltPW<T, Device>::StoHamiltPW(elecstate::Potential* pot_in,
                                     const int& npol,
                                     Real* emin_in,
                                     Real* emax_in)
-    : hamilt::HamiltPW<T, Device>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr), ngk(p_kv->ngk)
+    // nonlocal_field is only used by RT-TDDFT velocity gauge.
+    : hamilt::HamiltPW<T, Device>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr, true), ngk(p_kv->ngk)
 {
     this->classname = "StoHamiltPW";
     this->npwk_max = wfc_basis->npwk_max;

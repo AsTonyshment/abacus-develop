@@ -13,6 +13,7 @@
 #include "source_cell/module_symmetry/symmetry.h"
 #include "source_estate/module_pot/efield.h"
 #include "source_estate/module_pot/gatefield.h"
+#include "source_estate/module_pot/h_tddft_pw.h"
 #include "source_hamilt/module_ewald/h_ewald_pw.h"
 #include "source_hamilt/module_surchem/surchem.h"
 #include "source_hamilt/module_vdw/vdw.h"
@@ -27,6 +28,8 @@
 template <typename FPTYPE, typename Device>
 void Forces<FPTYPE, Device>::cal_force(
     const std::string &esolver_type,
+    const ModuleBase::Vector3<double> &nonlocal_a,
+    const ModuleBase::Vector3<double> &electric,
     const int nspin,
     const bool domag,
     const bool domag_z,
@@ -49,6 +52,7 @@ void Forces<FPTYPE, Device>::cal_force(
 {
     ModuleBase::timer::start("Forces", "cal_force");
     ModuleBase::TITLE("Forces", "init");
+    std::ofstream &running = GlobalV::ofs_running;
     this->device = base_device::get_device_type(this->ctx);
     const ModuleBase::matrix &wg = elec.wg;
     const ModuleBase::matrix &ekb = elec.ekb;
@@ -73,7 +77,7 @@ void Forces<FPTYPE, Device>::cal_force(
     {
 
         this->npwx = wfc_basis->npwk_max;
-        Forces::cal_force_nl(forcenl, wg, ekb, pkv, wfc_basis, p_sf, *p_nlpp, ucell, psi_in);
+        Forces::cal_force_nl(forcenl, nonlocal_a, wg, ekb, pkv, wfc_basis, p_sf, *p_nlpp, ucell, psi_in);
 
         if (PARAM.globalv.use_uspp)
         {
@@ -114,8 +118,15 @@ void Forces<FPTYPE, Device>::cal_force(
         }
         if (PARAM.inp.test_force)
         {
-            ModuleIO::print_force(GlobalV::ofs_running, ucell, "VDW      FORCE (Ry/Bohr)", force_vdw);
+            ModuleIO::print_force(running, ucell, "VDW      FORCE (Ry/Bohr)", force_vdw);
         }
+    }
+
+    // RT-TDDFT includes the direct ionic electric-field force in both gauges.
+    ModuleBase::matrix force_td(this->nat, 3);
+    if (esolver_type == "tddft")
+    {
+        elecstate::H_TDDFT_pw::compute_force(ucell, electric, force_td);
     }
 
     ModuleBase::matrix force_e;
@@ -125,7 +136,7 @@ void Forces<FPTYPE, Device>::cal_force(
         elecstate::Efield::compute_force(ucell, force_e);
         if (PARAM.inp.test_force)
         {
-            ModuleIO::print_force(GlobalV::ofs_running, ucell, "EFIELD      FORCE (Ry/Bohr)", force_e);
+            ModuleIO::print_force(running, ucell, "EFIELD      FORCE (Ry/Bohr)", force_e);
         }
     }
 
@@ -136,7 +147,7 @@ void Forces<FPTYPE, Device>::cal_force(
         elecstate::Gatefield::compute_force(ucell, force_gate);
         if (PARAM.inp.test_force)
         {
-            ModuleIO::print_force(GlobalV::ofs_running, ucell, "GATEFIELD      FORCE (Ry/Bohr)", force_gate);
+            ModuleIO::print_force(running, ucell, "GATEFIELD      FORCE (Ry/Bohr)", force_gate);
         }
     }
 
@@ -157,7 +168,7 @@ void Forces<FPTYPE, Device>::cal_force(
         }
         if (PARAM.inp.test_force)
         {
-            ModuleIO::print_force(GlobalV::ofs_running, ucell, "IMP_SOL      FORCE (Ry/Bohr)", forcesol);
+            ModuleIO::print_force(running, ucell, "IMP_SOL      FORCE (Ry/Bohr)", forcesol);
         }
     }
 
@@ -171,7 +182,7 @@ void Forces<FPTYPE, Device>::cal_force(
             for (int ia = 0; ia < ucell.atoms[it].na; ia++)
             {
                 force(iat, ipol) = forcelc(iat, ipol) + forceion(iat, ipol) + forcenl(iat, ipol) + forcecc(iat, ipol) +
-                                   forcescc(iat, ipol) + forcepcc(iat, ipol);
+                                   forcescc(iat, ipol) + forcepcc(iat, ipol) + force_td(iat, ipol);
 
                 if (vdw_result != nullptr) // linpz and jiyy added vdw force, modified by zhengdy
                 {
@@ -203,9 +214,10 @@ void Forces<FPTYPE, Device>::cal_force(
         }
     }
 
+    // RT-TDDFT retains the ionic net force to describe momentum exchange with electrons and the field.
     if (PARAM.inp.gate_flag || PARAM.inp.efield_flag || esolver_type == "tddft")
     {
-        GlobalV::ofs_running << " Notice: Atomic forces are not shifted for gate fields, electric fields, or RT-TDDFT!" << std::endl;
+        running << " Notice: Atomic forces are not shifted for gate fields, electric fields, or RT-TDDFT!" << std::endl;
     }
     else
     {
@@ -217,67 +229,41 @@ void Forces<FPTYPE, Device>::cal_force(
         ModuleSymmetry::symmetrize_force_cartesian(p_symm, this->nat, ucell.a1, ucell.a2, ucell.a3, force);
     }
 
-    GlobalV::ofs_running << std::setiosflags(std::ios::fixed) << std::setprecision(6) << std::endl;
-    /*if(PARAM.inp.test_force)
-    {
-        ModuleIO::print_force(GlobalV::ofs_running, ucell,"LOCAL    FORCE (Ry/Bohr)", forcelc);
-        ModuleIO::print_force(GlobalV::ofs_running, ucell,"NONLOCAL FORCE (Ry/Bohr)", forcenl);
-        ModuleIO::print_force(GlobalV::ofs_running, ucell,"NLCC     FORCE (Ry/Bohr)", forcecc);
-        ModuleIO::print_force(GlobalV::ofs_running, ucell,"ION      FORCE (Ry/Bohr)", forceion);
-        ModuleIO::print_force(GlobalV::ofs_running, ucell,"SCC      FORCE (Ry/Bohr)", forcescc);
-        if(GlobalV::EFIELD) ModuleIO::print_force(GlobalV::ofs_running, ucell,"EFIELD   FORCE (Ry/Bohr)",
-    force_e);
-    }*/
-
-    /*
-        ModuleIO::print_force(GlobalV::ofs_running, ucell,"   TOTAL-FORCE (Ry/Bohr)", force);
-
-        if(INPUT.out_force)                                                   // pengfei 2016-12-20
-        {
-            std::ofstream ofs("FORCE.dat");
-            if(!ofs)
-            {
-                std::cout << "open FORCE.dat error !" <<std::endl;
-            }
-            for(int iat=0; iat<this->nat; iat++)
-            {
-                ofs << "   " << force(iat,0)*ModuleBase::Ry_to_eV / 0.529177
-                    << "   " << force(iat,1)*ModuleBase::Ry_to_eV / 0.529177
-                    << "   " << force(iat,2)*ModuleBase::Ry_to_eV / 0.529177 << std::endl;
-            }
-            ofs.close();
-        }
-    */
+    running << std::setiosflags(std::ios::fixed) << std::setprecision(6) << std::endl;
 
     // output force in unit eV/Angstrom
-    GlobalV::ofs_running << std::endl;
+    running << std::endl;
 
     if (PARAM.inp.test_force)
     {
-        ModuleIO::print_force(GlobalV::ofs_running, ucell, "LOCAL    FORCE (eV/Angstrom)", forcelc, false);
-        ModuleIO::print_force(GlobalV::ofs_running, ucell, "NONLOCAL FORCE (eV/Angstrom)", forcenl, false);
-        ModuleIO::print_force(GlobalV::ofs_running, ucell, "NLCC     FORCE (eV/Angstrom)", forcecc, false);
-        ModuleIO::print_force(GlobalV::ofs_running, ucell, "ION      FORCE (eV/Angstrom)", forceion, false);
-        ModuleIO::print_force(GlobalV::ofs_running, ucell, "SCC      FORCE (eV/Angstrom)", forcescc, false);
+        ModuleIO::print_force(running, ucell, "LOCAL    FORCE (eV/Angstrom)", forcelc, false);
+        ModuleIO::print_force(running, ucell, "NONLOCAL FORCE (eV/Angstrom)", forcenl, false);
+        ModuleIO::print_force(running, ucell, "NLCC     FORCE (eV/Angstrom)", forcecc, false);
+        ModuleIO::print_force(running, ucell, "ION      FORCE (eV/Angstrom)", forceion, false);
+        ModuleIO::print_force(running, ucell, "SCC      FORCE (eV/Angstrom)", forcescc, false);
 
+        if (esolver_type == "tddft")
+        {
+            ModuleIO::print_force(running, ucell, "RT FIELD FORCE (eV/Angstrom)", force_td, false);
+        }
         if (PARAM.inp.efield_flag)
         {
-            ModuleIO::print_force(GlobalV::ofs_running, ucell, "EFIELD   FORCE (eV/Angstrom)", force_e, false);
+            ModuleIO::print_force(running, ucell, "EFIELD   FORCE (eV/Angstrom)", force_e, false);
         }
         if (PARAM.inp.gate_flag)
         {
-            ModuleIO::print_force(GlobalV::ofs_running, ucell, "GATEFIELD   FORCE (eV/Angstrom)", force_gate, false);
+            ModuleIO::print_force(running, ucell, "GATEFIELD   FORCE (eV/Angstrom)", force_gate, false);
         }
         if (solvation_model != 0)
         {
-            ModuleIO::print_force(GlobalV::ofs_running, ucell, "IMP_SOL   FORCE (eV/Angstrom)", forcesol, false);
+            ModuleIO::print_force(running, ucell, "IMP_SOL   FORCE (eV/Angstrom)", forcesol, false);
         }
         if (use_onsite_projection)
         {
-            ModuleIO::print_force(GlobalV::ofs_running, ucell, "ONSITE_PROJ    FORCE (eV/Angstrom)", forceonsite, false);
+            ModuleIO::print_force(running, ucell, "ONSITE_PROJ    FORCE (eV/Angstrom)", forceonsite, false);
         }
     }
-    ModuleIO::print_force(GlobalV::ofs_running, ucell, "TOTAL-FORCE (eV/Angstrom)", force, false);
+    ModuleIO::print_force(running, ucell, "TOTAL-FORCE (eV/Angstrom)", force, false);
     ModuleBase::timer::end("Forces", "cal_force");
     return;
 }

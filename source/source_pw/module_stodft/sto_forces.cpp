@@ -226,6 +226,8 @@ void Sto_Forces<FPTYPE, Device>::cal_sto_force_nl(
 
     hamilt::FS_Nonlocal_tools<FPTYPE, Device> nl_tools(&nlpp, &ucell, p_kv, wfc_basis, p_sf, wg, nullptr);
 
+    // nonlocal_a is only needed by RT-TDDFT
+    const ModuleBase::Vector3<double> nonlocal_a{0.0, 0.0, 0.0};
 
     for (int ik = 0; ik < wfc_basis->nks; ik++)
     {
@@ -235,7 +237,7 @@ void Sto_Forces<FPTYPE, Device>::cal_sto_force_nl(
         psi_in.fix_k(ik);
         stowf.shchi->fix_k(ik);
 
-        nl_tools.cal_vkb(ik, max_nbands); // vkb has dimension of nkb * max_nbands * npol
+        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a);
 
         // calculate becp = <psi|beta> for all beta functions
         nl_tools.cal_becp(ik, nksbands, psi_in.get_pointer(), 0);

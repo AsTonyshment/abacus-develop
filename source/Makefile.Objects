@@ -285,6 +285,7 @@ OBJS_ELECSTAT=elecstate.o\
     param_update.o\
     estate_e_terms.o\
     elecstate_energy.o\
+    td_energy.o\
     elecstate_exx.o\
     elecstate_print.o\
     elecstate_tools.o\

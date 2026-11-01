@@ -15,7 +15,8 @@ hamilt::HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
 		pseudopot_cell_vnl*,
         Plus_U_Base* p_dftu,
 		const UnitCell*,
-        const General_Exx_Info*){}
+        const General_Exx_Info*,
+        bool){}
 
 template <typename T, typename Device>
 hamilt::HamiltPW<T, Device>::~HamiltPW(){};
@@ -33,7 +34,8 @@ StoHamiltPW<T, Device>::StoHamiltPW(elecstate::Potential* pot_in,
                                     const int& npol,
                                     Real* emin_in,
                                     Real* emax_in)
-    : hamilt::HamiltPW<T, Device>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr), ngk(p_kv->ngk)
+    // nonlocal_field is only used by RT-TDDFT velocity gauge.
+    : hamilt::HamiltPW<T, Device>(pot_in, wfc_basis, p_kv, nlpp, nullptr, ucell, nullptr, true), ngk(p_kv->ngk)
 {
 }
 

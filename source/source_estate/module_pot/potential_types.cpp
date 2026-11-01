@@ -21,6 +21,11 @@
 
 namespace elecstate
 {
+void Potential::td_field_energy(const Charge& charge, double& electronic, double& ionic) const
+{
+    H_TDDFT_pw field(this->rho_basis_, this->ucell_, this->td_field_manager_);
+    field.field_energy(charge, electronic, ionic);
+}
 
 PotBase* Potential::make_sccs_pot(const Input_para& input, const SccsResume& resume)
 {

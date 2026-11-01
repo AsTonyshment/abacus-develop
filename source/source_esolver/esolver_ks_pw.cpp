@@ -2,6 +2,7 @@
 #include "source_pw/module_pwdft/pw_hybrid_nscf.h"
 
 #include "source_estate/elecstate_pw.h"
+#include "source_estate/module_pot/td_field_manager.h"
 #include "source_estate/module_charge/chg_symm.h"
 #include "source_hamilt/hamilt_hs_adapter.h"
 #include "source_hsolver/diago_iter_assist.h"
@@ -67,13 +68,16 @@ ESolver_KS_PW<T, Device>::~ESolver_KS_PW()
 template <typename T, typename Device>
 void ESolver_KS_PW<T, Device>::allocate_hamilt(const UnitCell& ucell)
 {
+    // nonlocal_field controls the nonlocal electromagnetic coupling in RT-TDDFT velocity gauge.
+    const bool nonlocal_field = this->inp_->td_vg_nl != 0;
     this->p_hamilt = new hamilt::HamiltPW<T, Device>(this->pelec->pot,
                                                      this->pw_wfc,
                                                      &this->kv,
                                                      &this->ppcell,
                                                      this->dftu_.get(),
                                                      &ucell,
-                                                     &this->general_exx_info_);
+                                                     &this->general_exx_info_,
+                                                     nonlocal_field);
 }
 
 template <typename T, typename Device>
@@ -490,8 +494,22 @@ void ESolver_KS_PW<T, Device>::cal_force(BaseCell& basecell, ModuleBase::matrix&
     // mohan add 2025-10-12
     this->stp.update_psi_d();
 
-    // Calculate forces
+    // RT-TDDFT uses the accepted endpoint fields; ground-state calls pass zero fields.
+    ModuleBase::Vector3<double> nonlocal_a{0.0, 0.0, 0.0};
+    ModuleBase::Vector3<double> electric{0.0, 0.0, 0.0};
+    const elecstate::TDFieldManager* field = this->pelec->pot->td_field_manager();
+    if (this->inp_->esolver_type == "tddft")
+    {
+        electric = field->efield_ha();
+        // td_vg_nl = 2 includes the vector potential shift in the nonlocal force projectors.
+        if (field->gauge() == 1 && this->inp_->td_vg_nl == 2)
+        {
+            nonlocal_a = field->A_right_ha();
+        }
+    }
     ff.cal_force(this->inp_->esolver_type,
+                 nonlocal_a,
+                 electric,
                  this->inp_->nspin,
                  PARAM.globalv.domag,
                  PARAM.globalv.domag_z,

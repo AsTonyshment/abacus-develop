@@ -13,9 +13,9 @@ TEST_F(Observables, CurrentsMatchPauliAndHamiltonianDerivative)
     request.charge_total = true;
     request.charge_per_k = true;
     request.spin_current = true;
-    const pw::TDVelResultPW actual = observer.calculate(*psi_, state_, a, request);
+    const pw::TDVelResultPW actual = observer.calculate(*psi_, state_, a, a, request);
     hamilt::Velocity<double, Device> velocity(&basis_, kv_.isk.data(), &pp_, &cell_, true, nullptr, 0, 0);
-    velocity.init(0, a);
+    velocity.init(0, a, a);
     const int n = psi_->get_nbasis();
     std::array<double, 3> charge{};
     std::array<double, 9> spin{};

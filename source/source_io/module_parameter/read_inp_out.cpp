@@ -1917,7 +1917,7 @@ $$\boldsymbol{J}(t)=-\frac{1}{\Omega}\sum_{n\boldsymbol{k}}f_{n\boldsymbol{k}}\o
 where $\Omega$ is the cell volume, $f_{n\boldsymbol{k}}$ includes occupations and k-point weights, and $\hat{\boldsymbol{v}}$ is the velocity operator.
 
 * `0`: Disable current output.
-* `1`: Available for PW and LCAO. Evaluate the velocity from momentum and nonlocal pseudopotential contributions, including coupling to the vector potential in the velocity gauge. Other nonlocal terms, such as exact exchange, are not included. Write the total current to `OUT.{suffix}/current_tot.txt`.
+* `1`: Available for PW and LCAO. Evaluate the transport velocity from momentum and the nonlocal pseudopotential position commutator, including coupling to the vector potential in the velocity gauge. In PW, the nonlocal operator follows `td_vg_nl`: at `0` it is unshifted, while the kinetic momentum still includes the vector potential. Other nonlocal terms, such as exact exchange, are not included. Write the total current to `OUT.{suffix}/current_tot.txt`.
 * `2`: Available only for LCAO. Construct the velocity matrix from the full Hamiltonian in the nonorthogonal atomic-orbital basis: $\widetilde{v}_{\alpha}=\partial_{k_{\alpha}}H+\mathrm{i}HS^{-1}\mathcal{R}_{\alpha}-\mathrm{i}\mathcal{R}_{\alpha}S^{-1}H-HS^{-1}\partial_{k_{\alpha}}S$, where $H$, $S$, and $\mathcal{R}_{\alpha}$ are the Hamiltonian, overlap, and position matrices in k space. This automatically includes nonlocal contributions present in the Hamiltonian, including exact exchange. Write the total current to `OUT.{suffix}/current_tot_comm.txt`.
 
 Each row contains the step index followed by $J_x$, $J_y$, and $J_z$.)";

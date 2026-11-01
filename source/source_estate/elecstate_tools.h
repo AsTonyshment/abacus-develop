@@ -5,23 +5,31 @@
 
 namespace elecstate
 {
-void calEBand(const ModuleBase::matrix& ekb, const ModuleBase::matrix& wg, fenergy& f_en);
+void calEBand(const ModuleBase::matrix &ekb, const ModuleBase::matrix &wg, fenergy &f_en);
+/** @brief RT-TDDFT accepted-state material energy in Ry; scalar field energies and Hamilton energy are returned separately. */
+double cal_td_energy(
+    const ElecState &state,
+    double &electronic_field,
+    double &ionic_field,
+    double &hamilton);
 
-void calculate_weights(const ModuleBase::matrix& ekb,
-                       ModuleBase::matrix& wg,
-                       const K_Vectors* klist,
-                       Efermi& eferm,
-                       fenergy& f_en,
-                       std::vector<double>& nelec_spin,
-                       const int global_nbands,
-                       const bool skip_weights);
+void calculate_weights(
+    const ModuleBase::matrix &ekb,
+    ModuleBase::matrix &wg,
+    const K_Vectors *klist,
+    Efermi &eferm,
+    fenergy &f_en,
+    std::vector<double> &nelec_spin,
+    const int global_nbands,
+    const bool skip_weights);
 
-void fixed_weights(const std::vector<double>& ocp_kb,
-                   const int& nbands,
-                   const double& nelec,
-                   const K_Vectors* klist,
-                   ModuleBase::matrix& wg,
-                   bool& skip_weights);
+void fixed_weights(
+    const std::vector<double> &ocp_kb,
+    const int &nbands,
+    const double &nelec,
+    const K_Vectors *klist,
+    ModuleBase::matrix &wg,
+    bool &skip_weights);
 } // namespace elecstate
 
 #endif

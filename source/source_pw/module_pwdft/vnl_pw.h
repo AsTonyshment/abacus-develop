@@ -58,15 +58,17 @@ class pseudopot_cell_vnl
      * @param ctx Device context.
      * @param ucell Unit cell defining reciprocal-space units.
      * @param ik K-point index.
-     * @param vector_potential Vector potential in Hartree atomic units.
+     * @param vector_potential RT-TDDFT nonlocal momentum shift in Hartree atomic units; zero for ground-state calls.
      * @param vkb_in Output projector buffer.
+     * @param lead_dim Stride between projectors in complex elements, at least the local npw.
      */
     template <typename FPTYPE, typename Device>
     void getvnl(Device* ctx,
                 const UnitCell& ucell,
                 const int& ik,
                 const ModuleBase::Vector3<double>& vector_potential,
-                std::complex<FPTYPE>* vkb_in) const;
+                std::complex<FPTYPE>* vkb_in,
+                int lead_dim) const;
 
     // void getvnl_alpha(const int &ik);
 

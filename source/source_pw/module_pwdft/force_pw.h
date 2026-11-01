@@ -53,9 +53,16 @@ class Forces
     Forces(const int nat_in) : nat(nat_in) {};
     ~Forces() {};
 
-    /** @brief Return PW forces in Ry/Bohr and print them in eV/Angstrom. */
+    /**
+     * @brief Return PW forces in Ry/Bohr and print them in eV/Angstrom.
+     * @param esolver_type Selects the RT-TDDFT instantaneous-force treatment for "tddft".
+     * @param nonlocal_a RT-TDDFT nonlocal momentum shift in Hartree atomic units; zero for ground-state calls.
+     * @param electric RT-TDDFT electric field in Hartree atomic units; zero for ground-state calls.
+     */
     void cal_force(
         const std::string &esolver_type,
+        const ModuleBase::Vector3<double> &nonlocal_a,
+        const ModuleBase::Vector3<double> &electric,
         const int nspin,
         const bool domag,
         const bool domag_z,
@@ -111,8 +118,10 @@ class Forces
      *    (2) calculate becp = <psi | beta> ----- second line in the above equation
      *    (3) calculate dbecp = <psi | \nabla beta> ----- third line in the above equation
      */
+    // nonlocal_a selects the RT-TDDFT projector shift in Hartree atomic units; ground-state calls pass zero.
     void cal_force_nl(
         ModuleBase::matrix &forcenl,
+        const ModuleBase::Vector3<double> &nonlocal_a,
         const ModuleBase::matrix &wg,
         const ModuleBase::matrix &ekb,
         const K_Vectors *p_kv,
