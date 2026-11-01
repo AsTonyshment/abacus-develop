@@ -11,8 +11,35 @@
 
 #include "source_base/parallel_comm.h" // different MPI worlds (POOL_WORLD)
 
+#include <algorithm>
+
 namespace hamilt
 {
+
+template <typename FPTYPE, typename Device>
+void FS_Nonlocal_tools<FPTYPE, Device>::allocate_stress_memory()
+{
+    int max_nbeta = 0;
+    int max_nh = 0;
+    for (int it = 0; it < this->ntype; ++it)
+    {
+        max_nbeta = std::max(this->ucell_->atoms[it].ncpp.nbeta, max_nbeta);
+        max_nh = std::max(this->ucell_->atoms[it].ncpp.nh, max_nh);
+    }
+    const int ylm_count = (this->nlpp_->lmaxkb + 1) * (this->nlpp_->lmaxkb + 1);
+    resmem_var_op()(this->hd_vq, max_nbeta * this->max_npw);
+    resmem_var_op()(this->hd_vq_deri, max_nbeta * this->max_npw);
+    resmem_var_op()(this->hd_ylm, ylm_count * this->max_npw);
+    resmem_var_op()(this->hd_ylm_deri, 3 * ylm_count * this->max_npw);
+    resmem_complex_op()(this->hd_sk, this->ucell_->nat * this->max_npw);
+    if (this->device == base_device::GpuDevice)
+    {
+        resmem_int_op()(this->d_dvkb_indexes, max_nh * 4);
+        resmem_var_op()(this->d_g_plus_k, this->max_npw * 5);
+        resmem_var_op()(this->d_vq_tab, this->nlpp_->tab.getSize());
+        resmem_complex_op()(this->d_pref_in, max_nh);
+    }
+}
 
 // cal_dbecp
 template <typename FPTYPE, typename Device>
@@ -22,6 +49,10 @@ void FS_Nonlocal_tools<FPTYPE, Device>::cal_vkb_deri_s(const int& ik,
                                                        const int& jpol)
 {
     ModuleBase::TITLE("FS_Nonlocal_tools", "cal_vkb_deri_s");
+    if (this->pre_ik_s == -1)
+    {
+        this->allocate_stress_memory();
+    }
     const int npol = this->ucell_->get_npol();
     const int size_becp = nbdall * npol * this->nkb;
     if (this->dbecp == nullptr)
@@ -39,7 +70,6 @@ void FS_Nonlocal_tools<FPTYPE, Device>::cal_vkb_deri_s(const int& ik,
     {
         // Prepare the zero-field geometry shared by all stress components at this k point.
         this->g_plus_k = maths.cal_gk(ik, this->wfc_basis_);
-        resmem_complex_op()(this->hd_sk, this->ucell_->nat * npw);
         this->sf_->get_sk(this->ctx, ik, this->wfc_basis_, this->hd_sk);
         const int lmax_ = this->nlpp_->lmaxkb;
         maths.cal_ylm(lmax_, npw, g_plus_k.data(), hd_ylm);
@@ -61,12 +91,6 @@ void FS_Nonlocal_tools<FPTYPE, Device>::cal_vkb_deri_s(const int& ik,
 
     for (int it = 0; it < this->ucell_->ntype; it++) // loop all elements
     {
-        int lenth_vq = this->ucell_->atoms[it].ncpp.nbeta * npw;
-        // prepare inputs for calculating vkb，vkb1，vkb2
-        // prepare vq and vq', size: nq * this->max_npw
-        std::vector<double> vq(lenth_vq); // cal_vq(it, g_plus_k.data(), npw);
-        // std::vector<double> vq2(vq.size());
-
         cal_vq_op()(this->ctx,
                     vq_tb,
                     it,

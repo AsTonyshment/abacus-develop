@@ -8,7 +8,24 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 #include <vector>
+
+namespace
+{
+template <typename Value, typename Device>
+Value *reserve_vnl_buffer(ct::Tensor &buffer, const std::int64_t count)
+{
+    using CtDevice = typename ct::PsiToContainer<Device>::type;
+    const auto data_type = ct::DataTypeToEnum<Value>::value;
+    const auto device_type = ct::DeviceTypeToEnum<CtDevice>::value;
+    if (buffer.NumElements() < count || buffer.data_type() != data_type || buffer.device_type() != device_type)
+    {
+        buffer = ct::Tensor(data_type, device_type, {count});
+    }
+    return buffer.data<Value>();
+}
+} // namespace
 
 /**
  * @brief Calculate velocity-gauge nonlocal projectors at k+G+A(t).
@@ -30,15 +47,9 @@ void pseudopot_cell_vnl::getvnl(
     ModuleBase::timer::start("pp_cell_vnl", "getvnl");
 
     using cal_vnl_op = hamilt::cal_vnl_op<FPTYPE, Device>;
-    using resmem_int_op = base_device::memory::resize_memory_op<int, Device>;
-    using delmem_int_op = base_device::memory::delete_memory_op<int, Device>;
     using syncmem_int_op = base_device::memory::synchronize_memory_op<int, Device, base_device::DEVICE_CPU>;
-    using resmem_var_op = base_device::memory::resize_memory_op<FPTYPE, Device>;
-    using delmem_var_op = base_device::memory::delete_memory_op<FPTYPE, Device>;
     using castmem_var_h2d_op = base_device::memory::cast_memory_op<FPTYPE, double, Device, base_device::DEVICE_CPU>;
     using castmem_var_h2h_op = base_device::memory::cast_memory_op<FPTYPE, double, base_device::DEVICE_CPU, base_device::DEVICE_CPU>;
-    using resmem_complex_op = base_device::memory::resize_memory_op<std::complex<FPTYPE>, Device>;
-    using delmem_complex_op = base_device::memory::delete_memory_op<std::complex<FPTYPE>, Device>;
 
     if (this->lmaxkb < 0 || this->wfcpw->npwk[ik] == 0)
     {
@@ -48,13 +59,16 @@ void pseudopot_cell_vnl::getvnl(
 
     const int ylm_count = (this->lmaxkb + 1) * (this->lmaxkb + 1);
     const int npw = this->wfcpw->npwk[ik];
+    const int precision = std::is_same<FPTYPE, float>::value ? 0 : 1;
 
     int *atom_nh = nullptr;
     int *atom_na = nullptr;
     int *atom_nb = nullptr;
-    std::vector<int> host_atom_nh(ucell.ntype);
-    std::vector<int> host_atom_na(ucell.ntype);
-    std::vector<int> host_atom_nb(ucell.ntype);
+    const std::int64_t metadata_elements = 3 * static_cast<std::int64_t>(ucell.ntype);
+    this->vnl_host_atom_counts_.resize(metadata_elements);
+    int *host_atom_nh = this->vnl_host_atom_counts_.data();
+    int *host_atom_nb = host_atom_nh + ucell.ntype;
+    int *host_atom_na = host_atom_nb + ucell.ntype;
     for (int it = 0; it < ucell.ntype; ++it)
     {
         host_atom_nb[it] = ucell.atoms[it].ncpp.nbeta;
@@ -62,9 +76,7 @@ void pseudopot_cell_vnl::getvnl(
         host_atom_na[it] = ucell.atoms[it].na;
     }
 
-    FPTYPE *vkb_radial = nullptr;
     FPTYPE *shifted_gk_data = nullptr;
-    FPTYPE *ylm = nullptr;
     FPTYPE *tab_ptr = this->get_tab_data<FPTYPE>();
     FPTYPE *indv_ptr = this->get_indv_data<FPTYPE>();
     FPTYPE *nhtol_ptr = this->get_nhtol_data<FPTYPE>();
@@ -72,11 +84,12 @@ void pseudopot_cell_vnl::getvnl(
     const std::int64_t ylm_elements = static_cast<std::int64_t>(ylm_count) * npw;
     const std::int64_t radial_elements = static_cast<std::int64_t>(this->nhm) * npw;
     const std::int64_t momentum_elements = static_cast<std::int64_t>(npw) * 3;
-    resmem_var_op()(ylm, ylm_elements, "VNL::ylm");
-    resmem_var_op()(vkb_radial, radial_elements, "VNL::vkb_radial");
+    FPTYPE *ylm = reserve_vnl_buffer<FPTYPE, Device>(this->vnl_ylm_[precision], ylm_elements);
+    FPTYPE *vkb_radial = reserve_vnl_buffer<FPTYPE, Device>(this->vnl_radial_[precision], radial_elements);
 
     const ModuleBase::Vector3<double> reduced_vector_potential = vector_potential / ucell.tpiba;
-    std::vector<ModuleBase::Vector3<double>> shifted_gk(npw);
+    this->vnl_host_momentum_.resize(npw);
+    std::vector<ModuleBase::Vector3<double>> &shifted_gk = this->vnl_host_momentum_;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -100,24 +113,22 @@ void pseudopot_cell_vnl::getvnl(
 
     if (this->use_gpu_)
     {
-        resmem_int_op()(atom_nh, ucell.ntype);
-        resmem_int_op()(atom_nb, ucell.ntype);
-        resmem_int_op()(atom_na, ucell.ntype);
-        syncmem_int_op()(atom_nh, host_atom_nh.data(), ucell.ntype);
-        syncmem_int_op()(atom_nb, host_atom_nb.data(), ucell.ntype);
-        syncmem_int_op()(atom_na, host_atom_na.data(), ucell.ntype);
+        atom_nh = reserve_vnl_buffer<int, Device>(this->vnl_atom_counts_, metadata_elements);
+        atom_nb = atom_nh + ucell.ntype;
+        atom_na = atom_nb + ucell.ntype;
+        syncmem_int_op()(atom_nh, host_atom_nh, metadata_elements);
 
-        resmem_var_op()(shifted_gk_data, momentum_elements);
+        shifted_gk_data = reserve_vnl_buffer<FPTYPE, Device>(this->vnl_momentum_[precision], momentum_elements);
         castmem_var_h2d_op()(shifted_gk_data, reinterpret_cast<double *>(shifted_gk.data()), momentum_elements);
     }
     else
     {
-        atom_nh = host_atom_nh.data();
-        atom_nb = host_atom_nb.data();
-        atom_na = host_atom_na.data();
+        atom_nh = host_atom_nh;
+        atom_nb = host_atom_nb;
+        atom_na = host_atom_na;
         if (std::is_same<FPTYPE, float>::value)
         {
-            resmem_var_op()(shifted_gk_data, momentum_elements);
+            shifted_gk_data = reserve_vnl_buffer<FPTYPE, Device>(this->vnl_momentum_[precision], momentum_elements);
             castmem_var_h2h_op()(shifted_gk_data, reinterpret_cast<double *>(shifted_gk.data()), momentum_elements);
         }
         else
@@ -128,9 +139,9 @@ void pseudopot_cell_vnl::getvnl(
 
     ModuleBase::YlmReal::Ylm_Real(ctx, ylm_count, npw, shifted_gk_data, ylm);
 
-    std::complex<FPTYPE> *structure_factor = nullptr;
     const std::int64_t structure_elements = static_cast<std::int64_t>(ucell.nat) * npw;
-    resmem_complex_op()(structure_factor, structure_elements);
+    std::complex<FPTYPE> *structure_factor =
+        reserve_vnl_buffer<std::complex<FPTYPE>, Device>(this->vnl_structure_[precision], structure_elements);
     this->psf->get_sk(ctx, ik, this->wfcpw, structure_factor);
 
     cal_vnl_op()(
@@ -156,20 +167,6 @@ void pseudopot_cell_vnl::getvnl(
         vkb_radial,
         structure_factor,
         vkb_in);
-
-    delmem_var_op()(ylm);
-    delmem_var_op()(vkb_radial);
-    delmem_complex_op()(structure_factor);
-    if (this->use_gpu_ || std::is_same<FPTYPE, float>::value)
-    {
-        delmem_var_op()(shifted_gk_data);
-    }
-    if (this->use_gpu_)
-    {
-        delmem_int_op()(atom_nh);
-        delmem_int_op()(atom_nb);
-        delmem_int_op()(atom_na);
-    }
 
     ModuleBase::timer::end("pp_cell_vnl", "getvnl");
 }
