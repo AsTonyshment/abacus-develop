@@ -193,67 +193,28 @@ void MDCell::sync_backing_unitcell(const bool positions_updated)
 #ifdef __MPI
     if (size_ > 1)
     {
-        std::vector<int> type_offset(backing_unitcell_->ntype + 1, 0);
+        std::vector<double> cart;
+        std::vector<double> frac;
+        std::vector<double> vel;
+        std::vector<double> disp;
+        std::vector<int> shift;
+        std::vector<int> mbl;
+        collect_md(&cart, &frac, &vel, &disp, &shift, &mbl);
+        int id = 0;
         for (int it = 0; it < backing_unitcell_->ntype; ++it)
         {
-            type_offset[it + 1] = type_offset[it] + backing_unitcell_->atoms[it].na;
-        }
-
-        const int coordinate_count = 3 * nat_;
-        std::vector<double> cart(coordinate_count, 0.0);
-        std::vector<double> frac(coordinate_count, 0.0);
-        std::vector<double> vel(coordinate_count, 0.0);
-        std::vector<double> displacement(coordinate_count, 0.0);
-        std::vector<int> boundary_shift(coordinate_count, 0);
-        std::vector<int> mbl(coordinate_count, 0);
-        std::vector<int> owner(nat_, 0);
-
-        for (std::size_t i = 0; i < owned_atoms_.size(); ++i)
-        {
-            const LocalAtom& atom = owned_atoms_[i];
-            const int iat = type_offset[atom.type] + atom.type_index;
-            for (int axis = 0; axis < 3; ++axis)
+            Atom& atoms = backing_unitcell_->atoms[it];
+            for (int ia = 0; ia < atoms.na; ++ia, ++id)
             {
-                const int component = 3 * iat + axis;
-                cart[component] = atom.cart[axis];
-                frac[component] = atom.frac[axis];
-                vel[component] = atom.vel[axis];
-                displacement[component] = atom.displacement[axis];
-                boundary_shift[component] = atom.boundary_shift[axis];
-                mbl[component] = atom.mbl[axis];
-            }
-            owner[iat] = 1;
-        }
-
-        ModuleBase::CommunicationDomain domain;
-        domain.initialize(comm_);
-        domain.sum(cart.data(), coordinate_count);
-        domain.sum(frac.data(), coordinate_count);
-        domain.sum(vel.data(), coordinate_count);
-        domain.sum(displacement.data(), coordinate_count);
-        domain.sum(boundary_shift.data(), coordinate_count);
-        domain.sum(mbl.data(), coordinate_count);
-        const int atom_count = nat_;
-        domain.sum(owner.data(), atom_count);
-
-        for (int it = 0; it < backing_unitcell_->ntype; ++it)
-        {
-            for (int ia = 0; ia < backing_unitcell_->atoms[it].na; ++ia)
-            {
-                const int iat = type_offset[it] + ia;
-                if (owner[iat] != 1)
-                {
-                    throw std::runtime_error("MDCell backing UnitCell atom ownership is invalid.");
-                }
                 for (int axis = 0; axis < 3; ++axis)
                 {
-                    const int component = 3 * iat + axis;
-                    backing_unitcell_->atoms[it].tau[ia][axis] = cart[component];
-                    backing_unitcell_->atoms[it].taud[ia][axis] = frac[component];
-                    backing_unitcell_->atoms[it].vel[ia][axis] = vel[component];
-                    backing_unitcell_->atoms[it].dis[ia][axis] = displacement[component];
-                    backing_unitcell_->atoms[it].boundary_shift[ia][axis] = boundary_shift[component];
-                    backing_unitcell_->atoms[it].mbl[ia][axis] = mbl[component];
+                    const int pos = 3 * id + axis;
+                    atoms.tau[ia][axis] = cart[pos];
+                    atoms.taud[ia][axis] = frac[pos];
+                    atoms.vel[ia][axis] = vel[pos];
+                    atoms.dis[ia][axis] = disp[pos];
+                    atoms.boundary_shift[ia][axis] = shift[pos];
+                    atoms.mbl[ia][axis] = mbl[pos];
                 }
             }
         }
@@ -331,4 +292,72 @@ void MDCell::sync_backing_unitcell_geometry_()
     backing_unitcell_->a1.set(latvec_.e11, latvec_.e12, latvec_.e13);
     backing_unitcell_->a2.set(latvec_.e21, latvec_.e22, latvec_.e23);
     backing_unitcell_->a3.set(latvec_.e31, latvec_.e32, latvec_.e33);
+}
+
+void MDCell::collect_md(std::vector<double>* cart,
+                        std::vector<double>* frac,
+                        std::vector<double>* vel,
+                        std::vector<double>* disp,
+                        std::vector<int>* shift,
+                        std::vector<int>* mbl) const
+{
+    // Use type-major indices shared by UnitCell synchronization and read-only ionic sampling.
+    const std::vector<std::int64_t>& counts = type_atom_counts_;
+    const std::size_t ntypes = counts.size();
+    const std::size_t noff = ntypes + 1;
+    std::vector<int> offsets(noff, 0);
+    for (std::size_t it = 0; it < ntypes; ++it)
+    {
+        offsets[it + 1] = offsets[it] + counts[it];
+    }
+    const int nat = offsets.back();
+    const int nxyz = 3 * nat;
+    cart->assign(nxyz, 0.0);
+    frac->assign(nxyz, 0.0);
+    vel->assign(nxyz, 0.0);
+    disp->assign(nxyz, 0.0);
+    shift->assign(nxyz, 0);
+    mbl->assign(nxyz, 0);
+    std::vector<int> owners(nat, 0);
+    // Each atom contributes from its owning rank once, allowing sums to reconstruct complete arrays after migration.
+    for (const LocalAtom& atom : owned_atoms_)
+    {
+        const int id = offsets[atom.type] + atom.type_index;
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const int pos = 3 * id + axis;
+            (*cart)[pos] = atom.cart[axis];
+            (*frac)[pos] = atom.frac[axis];
+            (*vel)[pos] = atom.vel[axis];
+            (*disp)[pos] = atom.displacement[axis];
+            (*shift)[pos] = atom.boundary_shift[axis];
+            (*mbl)[pos] = atom.mbl[axis];
+        }
+        owners[id] = 1;
+    }
+#ifdef __MPI
+    ModuleBase::CommunicationDomain domain;
+    domain.initialize(comm_);
+    double* cart_data = cart->data();
+    double* frac_data = frac->data();
+    double* vel_data = vel->data();
+    double* disp_data = disp->data();
+    int* shift_data = shift->data();
+    int* mbl_data = mbl->data();
+    int* owner_data = owners.data();
+    domain.sum(cart_data, nxyz);
+    domain.sum(frac_data, nxyz);
+    domain.sum(vel_data, nxyz);
+    domain.sum(disp_data, nxyz);
+    domain.sum(shift_data, nxyz);
+    domain.sum(mbl_data, nxyz);
+    domain.sum(owner_data, nat);
+#endif
+    for (const int count : owners)
+    {
+        if (count != 1)
+        {
+            throw std::runtime_error("MD atom ownership is invalid.");
+        }
+    }
 }

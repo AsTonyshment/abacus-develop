@@ -2,18 +2,20 @@
 
 #include "source_pw/module_rt/prop_cn_pw.h"
 #include "source_pw/module_rt/prop_etrs_pw.h"
+#include "source_pw/module_rt/td_ion_pw.h"
 
 #include <utility>
 
 namespace pw
 {
 template <typename T, typename Device>
-std::unique_ptr<TDPropPW<T, Device>> make_td_prop(const ModulePW::PW_Basis_K& basis,
-                                                  const Input_para& input,
-                                                  int npol,
-                                                  const std::vector<int>& global_k,
-                                                  const hsolver::diag_comm_info& comm,
-                                                  std::ostream& log)
+std::unique_ptr<TDPropPW<T, Device>> make_td_prop(
+    const ModulePW::PW_Basis_K &basis,
+    const Input_para &input,
+    int npol,
+    const std::vector<int> &global_k,
+    const hsolver::diag_comm_info &comm,
+    std::ostream &log)
 {
     const hsolver::OrthMethod orth_method = hsolver::parse_orth_method(input.td_orthonormal);
     std::unique_ptr<hsolver::TDOrbOps<T, Device>> orb_ops(
@@ -49,84 +51,79 @@ std::unique_ptr<TDPropPW<T, Device>> make_td_prop(const ModulePW::PW_Basis_K& ba
 }
 
 template <typename T, typename Device>
-TDPropPW<T, Device>::TDPropPW(const ModulePW::PW_Basis_K& basis,
-                              std::unique_ptr<hsolver::TDOrbOps<T, Device>> orb_ops,
-                              std::unique_ptr<PWProp<T, Device>> prop)
+TDPropPW<T, Device>::TDPropPW(
+    const ModulePW::PW_Basis_K &basis, std::unique_ptr<hsolver::TDOrbOps<T, Device>> orb_ops, std::unique_ptr<PWProp<T, Device>> prop)
     : basis_(basis), orb_ops_(std::move(orb_ops)), prop_(std::move(prop))
 {
 }
 
 template <typename T, typename Device>
-PropStage TDPropPW<T, Device>::stage(int scf_iter) const
+double TDPropPW<T, Device>::sample_time(double left, double right) const
 {
-    return scf_iter == 1 ? PropStage::predictor : PropStage::corrector;
+    return prop_->sample_time(left, right);
 }
+
 template <typename T, typename Device>
 void TDPropPW<T, Device>::begin_trial()
 {
     prop_->begin_trial();
 }
+
 template <typename T, typename Device>
-void TDPropPW<T, Device>::finish_trial()
+void TDPropPW<T, Device>::evolve(
+    hamilt::HamiltPW<T, Device> *hamilt,
+    const typename GetTypeReal<T>::type *veff,
+    int nveff,
+    const TDHistoryPW<T, Device> &history,
+    const elecstate::TDFieldManager &field,
+    TDIonPW *ions,
+    const unitcell::IonicState &sample,
+    const unitcell::IonicState &right,
+    psi::Psi<T, Device> *current,
+    int elec_step,
+    int scf_iter,
+    bool log_detail)
 {
-    prop_->discard_trial();
-}
-template <typename T, typename Device>
-void TDPropPW<T, Device>::discard_trial()
-{
-    prop_->discard_trial();
-}
-template <typename T, typename Device>
-void TDPropPW<T, Device>::invalidate_basis()
-{
-    prop_->invalidate_basis();
-}
-template <typename T, typename Device>
-void TDPropPW<T, Device>::evolve(hamilt::HamiltPW<T, Device>& hamilt,
-                                 elecstate::Potential& potential,
-                                 const TDHistoryPW<T, Device>& history,
-                                 const elecstate::TDFieldManager& field,
-                                 psi::Psi<T, Device>* current,
-                                 int elec_step,
-                                 int scf_iter,
-                                 bool log_detail)
-{
-    using Real = typename T::value_type;
-    TDHamiltPW<T, Device> td_hamilt(hamilt, basis_);
-    prop_->evolve(td_hamilt, history, potential, field, current, elec_step, scf_iter, log_detail);
+    TDHamiltPW<T, Device> td_hamilt(hamilt, basis_, ions);
+    prop_->evolve(&td_hamilt, history, veff, nveff, field, sample, right, current, elec_step, scf_iter, log_detail);
     orb_ops_->correct(current, elec_step, scf_iter, log_detail);
-    const Real* endpoint = potential.template get_veff_smooth_data<Real>();
-    const ModuleBase::Vector3<double>& vecpot_ha = field.A_right_ha();
-    td_hamilt.bind(endpoint, vecpot_ha);
+    // Restore endpoint operators after midpoint or left-endpoint propagation for density and band-energy evaluation.
+    const ModuleBase::Vector3<double> &vecpot_ha = field.A_right_ha();
+    td_hamilt.bind(veff, vecpot_ha, right);
 }
+
 template class TDPropPW<std::complex<float>, base_device::DEVICE_CPU>;
-template std::unique_ptr<TDPropPW<std::complex<float>, base_device::DEVICE_CPU>> make_td_prop(const ModulePW::PW_Basis_K&,
-                                                                                              const Input_para&,
-                                                                                              int,
-                                                                                              const std::vector<int>&,
-                                                                                              const hsolver::diag_comm_info&,
-                                                                                              std::ostream&);
+template std::unique_ptr<TDPropPW<std::complex<float>, base_device::DEVICE_CPU>> make_td_prop(
+    const ModulePW::PW_Basis_K &,
+    const Input_para &,
+    int,
+    const std::vector<int> &,
+    const hsolver::diag_comm_info &,
+    std::ostream &);
 template class TDPropPW<std::complex<double>, base_device::DEVICE_CPU>;
-template std::unique_ptr<TDPropPW<std::complex<double>, base_device::DEVICE_CPU>> make_td_prop(const ModulePW::PW_Basis_K&,
-                                                                                               const Input_para&,
-                                                                                               int,
-                                                                                               const std::vector<int>&,
-                                                                                               const hsolver::diag_comm_info&,
-                                                                                               std::ostream&);
+template std::unique_ptr<TDPropPW<std::complex<double>, base_device::DEVICE_CPU>> make_td_prop(
+    const ModulePW::PW_Basis_K &,
+    const Input_para &,
+    int,
+    const std::vector<int> &,
+    const hsolver::diag_comm_info &,
+    std::ostream &);
 #if defined(__CUDA) || defined(__ROCM)
 template class TDPropPW<std::complex<float>, base_device::DEVICE_GPU>;
-template std::unique_ptr<TDPropPW<std::complex<float>, base_device::DEVICE_GPU>> make_td_prop(const ModulePW::PW_Basis_K&,
-                                                                                              const Input_para&,
-                                                                                              int,
-                                                                                              const std::vector<int>&,
-                                                                                              const hsolver::diag_comm_info&,
-                                                                                              std::ostream&);
+template std::unique_ptr<TDPropPW<std::complex<float>, base_device::DEVICE_GPU>> make_td_prop(
+    const ModulePW::PW_Basis_K &,
+    const Input_para &,
+    int,
+    const std::vector<int> &,
+    const hsolver::diag_comm_info &,
+    std::ostream &);
 template class TDPropPW<std::complex<double>, base_device::DEVICE_GPU>;
-template std::unique_ptr<TDPropPW<std::complex<double>, base_device::DEVICE_GPU>> make_td_prop(const ModulePW::PW_Basis_K&,
-                                                                                               const Input_para&,
-                                                                                               int,
-                                                                                               const std::vector<int>&,
-                                                                                               const hsolver::diag_comm_info&,
-                                                                                               std::ostream&);
+template std::unique_ptr<TDPropPW<std::complex<double>, base_device::DEVICE_GPU>> make_td_prop(
+    const ModulePW::PW_Basis_K &,
+    const Input_para &,
+    int,
+    const std::vector<int> &,
+    const hsolver::diag_comm_info &,
+    std::ostream &);
 #endif
 } // namespace pw

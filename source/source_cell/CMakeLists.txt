@@ -22,6 +22,7 @@ add_library(
   read_pp_vwr.cpp
   mdcell_reader.cpp
   mdcell.cpp
+  ionic_state.cpp
   unitcell.cpp
   unitcell_index.cpp
   unitcell_stats.cpp

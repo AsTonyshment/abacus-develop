@@ -3,13 +3,12 @@
 #include "source_base/parallel_reduce.h"
 #include "source_base/timer.h"
 #include "source_base/tool_quit.h"
-#include "source_cell/cell_tools.h"
 
 #include <algorithm>
 
 namespace pw
 {
-void check_td_input(const Input_para& input, const UnitCell& cell, int xc_type, bool cal_exx)
+void check_td_input(const Input_para &input, int xc_type, bool cal_exx)
 {
     if (input.out_current != 0 && input.out_current != 1)
     {
@@ -18,11 +17,6 @@ void check_td_input(const Input_para& input, const UnitCell& cell, int xc_type, 
     if (input.scf_nmax < 1)
     {
         ModuleBase::WARNING_QUIT("ESolver_KS_PW_TDDFT", "PW RT-TDDFT requires scf_nmax >= 1.");
-    }
-    if (unitcell::if_atoms_can_move(cell.atoms, cell.ntype))
-    {
-        ModuleBase::WARNING_QUIT("ESolver_KS_PW_TDDFT",
-                                 "PW RT-TDDFT requires fixed ions; set every atom's movement flags to 0 0 0 in STRU.");
     }
     if (input.mdp.md_type == "npt" || input.mdp.md_type == "msst")
     {
@@ -62,7 +56,18 @@ void check_td_input(const Input_para& input, const UnitCell& cell, int xc_type, 
     }
 }
 
-double td_momentum_bound(const ModulePW::PW_Basis_K& basis, const double tpiba)
+void check_td_ions(const Input_para &input)
+{
+    // Restrict moving paths to energy terms whose geometry-dependent data are refreshed by the PW RT workflow.
+    if ((input.vdw_method != "none" || input.efield_flag || input.gate_flag || input.imp_sol == 1 || input.dfthalf_type != 0 ||
+            input.assume_isolated == "makov-payne"))
+    {
+        ModuleBase::WARNING_QUIT(
+            "ESolver_KS_PW_TDDFT", "Prescribed PW ionic samples support the RT field and LDA/GGA pseudopotential energy terms.");
+    }
+}
+
+double td_momentum_bound(const ModulePW::PW_Basis_K &basis, const double tpiba)
 {
     ModuleBase::timer::start("pw", "td_momentum_bound");
     double bound = 0.0;
@@ -78,11 +83,12 @@ double td_momentum_bound(const ModulePW::PW_Basis_K& basis, const double tpiba)
     return bound;
 }
 
-void ensure_td_vnl(const UnitCell& cell,
-                   const double unshifted_bound,
-                   const ModuleBase::Vector3<double>& A_right_ha,
-                   const ModuleBase::Vector3<double>& A_prop_ha,
-                   pseudopot_cell_vnl* projectors)
+void ensure_td_vnl(
+    const UnitCell &cell,
+    const double unshifted_bound,
+    const ModuleBase::Vector3<double> &A_right_ha,
+    const ModuleBase::Vector3<double> &A_prop_ha,
+    pseudopot_cell_vnl *projectors)
 {
     ModuleBase::timer::start("pw", "ensure_td_vnl");
     const double field_bound = std::max(A_right_ha.norm(), A_prop_ha.norm());

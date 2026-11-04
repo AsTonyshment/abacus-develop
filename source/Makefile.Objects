@@ -254,6 +254,7 @@ OBJS_CELL=atom_pseudo.o\
     cal_ux.o\
     mdcell_reader.o\
     mdcell.o\
+    ionic_state.o\
     dom_core.o\
     dom_ghost.o\
     dom_migrate.o\
@@ -350,6 +351,7 @@ OBJS_ESOLVER=esolver_factory.o\
     esolver_fp.o\
     esolver_ks_pw.o\
     esolver_ks_pw_tddft.o\
+    pw_td_obs.o\
     esolver_ks_lcaopw.o\
     esolver_sdft_pw.o\
     esolver_forcefields.o\
@@ -399,6 +401,7 @@ OBJS_HAMILT=hamilt_pw.o\
     pw_hybrid_source.o\
     td_prop_pw.o\
     td_hamilt_pw.o\
+    td_ion_pw.o\
     prop_cn_pw.o\
     prop_etrs_pw.o\
     td_history_pw.o\
@@ -566,6 +569,7 @@ OBJS_MD=fire.o\
     langevin.o\
     md_base.o\
     md_func.o\
+    md_ionic_state.o\
     msst.o\
     nhchain.o\
     plumed_interface.o\

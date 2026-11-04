@@ -1,6 +1,8 @@
 #ifndef CHG_TOOLS_H
 #define CHG_TOOLS_H
 
+#include "source_base/matrix.h"
+
 // Free numerical kernels extracted from the Charge class so that the
 // density math (summation, electron-count integration, non-linear core
 // correction) can be tested and reused without dragging in Charge's state.
@@ -25,15 +27,20 @@ class PW_Basis;
 namespace module_charge
 {
 
-// Compute the core charge (non-linear core correction) on the real-space
-// 3D mesh. rho_core / rhog_core are the output buffers previously owned by
-// Charge; rhopw supplies the reciprocal-grid geometry and FFT backend.
-void set_rho_core(const UnitCell& ucell,
-                  const ModuleBase::ComplexMatrix& structure_factor,
+// Prepare element radial transforms for a fixed cell and reciprocal grid.
+// numeric supplies one pseudopotential flag per element.
+void cal_core_rad(const UnitCell& cell,
                   const bool* numeric,
+                  const ModulePW::PW_Basis& basis,
+                  ModuleBase::matrix* core_rad);
+
+// Assemble core density using previously prepared radial transforms.
+void set_rho_core(const UnitCell& cell,
+                  const ModuleBase::ComplexMatrix& sf,
+                  const ModuleBase::matrix& core_rad,
                   double* rho_core,
                   std::complex<double>* rhog_core,
-                  const ModulePW::PW_Basis& rhopw);
+                  const ModulePW::PW_Basis& basis);
 
 // First-order core-density response (the q-shifted derivative of the
 // core charge, QE addcore convention). Conventions: q_cart is in the

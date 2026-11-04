@@ -4,6 +4,7 @@
 #include "source_esolver/esolver_ks_pw.h"
 #include "source_estate/module_pot/td_field_manager.h"
 #include "source_pw/module_rt/td_history_pw.h"
+#include "source_pw/module_rt/td_ion_pw.h"
 #include "source_pw/module_rt/td_prop_pw.h"
 #include "source_pw/module_rt/td_spin_pw.h"
 #include "source_pw/module_rt/td_vel_pw.h"
@@ -23,9 +24,14 @@ class ESolver_KS_PW_TDDFT : public ESolver_KS_PW<T, Device>
 
     /** @brief Initialize the field, propagation solver and time-step history. */
     void before_all_runners(BaseCell &basecell, const Input_para &inp) override;
-
-    /** @brief Run the electronic steps belonging to the current MD step. */
+    /** @brief Adapt the fixed-ion MD schedule to initialization and electronic propagation. */
     void runner(BaseCell &basecell, const int istep) override;
+    /** @brief Propagate the inclusive electronic-step range with explicit ionic samples. */
+    void propagate(
+        UnitCell *cell,
+        int first_step,
+        int last_step,
+        const pw::TDIonPath &ions);
     double cal_energy() override;
 
   protected:
@@ -61,26 +67,39 @@ class ESolver_KS_PW_TDDFT : public ESolver_KS_PW<T, Device>
     std::ofstream &log_;
     std::unique_ptr<pw::TDPropPW<T, Device>> td_prop_;
 
-    std::shared_ptr<elecstate::TDFieldManager> td_field_manager_;
+    std::shared_ptr<elecstate::TDFieldManager> field_;
     pw::TDVelPW<Real, Device> vel_;
     pw::TDSpinPW<Real, Device> spin_;
     pw::CurrentRequest current_req_;
 
     pw::TDHistoryPW<T, Device> history_;
-    double initial_wave_electrons_ = 0.0;
-    double initial_rho_electrons_ = 0.0;
+    std::unique_ptr<pw::TDIonPW> ion_ops_;
+    // Keep the method's operator sample separate from the endpoint used for density and observables.
+    unitcell::IonicState prop_ions_;
+    unitcell::IonicState right_ions_;
+    double qmax_ = 0.0;
+    double npsi0_ = 0.0;
+    double nrho0_ = 0.0;
     double material_energy_ = 0.0;
 
-    void run_prop(UnitCell &cell, int step);
+    void run_prop(UnitCell *cell, int step, const pw::TDIonPath &ions);
     bool advance_interval(
-        UnitCell &cell,
+        UnitCell *cell,
         int step,
         int index,
         int depth,
         const elecstate::TDFieldState &full,
-        pw::TDElecSnap &accepted,
-        hsolver::TDOrthStats &stats);
-    void output_field(int step) const;
+        const pw::TDIonPath &ions,
+        hsolver::TDOrthStats *stats);
+    void rebuild_end(UnitCell *cell);
+    void out_prop(const UnitCell &cell, int step, bool converged);
+    void out_energy(int step, int rank, const std::string &out_dir);
+    void out_td(
+        const UnitCell &cell,
+        int step,
+        int rank,
+        const std::string &out_dir);
+    void out_eij(int step);
     /** @brief Print the one-based electronic step header. */
     void print_step(const int istep) const;
     void prep_td_step(const int istep);

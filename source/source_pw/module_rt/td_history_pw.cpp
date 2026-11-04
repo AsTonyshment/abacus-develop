@@ -11,87 +11,104 @@ namespace pw
 namespace
 {
 
-template <typename Real, typename Device>
-void prepare_potential(const ModuleBase::matrix& potential, ct::Tensor* previous)
+template <typename T, typename Device>
+void copy_wave(const psi::Psi<T, Device> &source, psi::Psi<T, Device> *target)
 {
-    using CtDevice = typename ct::PsiToContainer<Device>::type;
-    const ct::DeviceType device = ct::DeviceTypeToEnum<CtDevice>::value;
-    const int64_t size = std::max<int64_t>(1, static_cast<int64_t>(potential.nr) * potential.nc);
-    if (previous->NumElements() < size || previous->data_type() != ct::DataTypeToEnum<Real>::value || previous->device_type() != device)
-    {
-        *previous = ct::Tensor(ct::DataTypeToEnum<Real>::value, device, {size});
-    }
-}
-
-template <typename Real, typename Device>
-void save_potential(const ModuleBase::matrix& shape, const Real* current, ct::Tensor* previous)
-{
-    const int size = shape.nr * shape.nc;
-    if (size > 0)
-    {
-        base_device::memory::synchronize_memory_op<Real, Device, Device>()(previous->template data<Real>(), current, size);
-    }
+    // Copy all k points into existing storage and preserve the active cursor for later operator calls.
+    const T *data = source.get_pointer() - source.get_psi_bias();
+    target->set_all_psi(data, source.size());
+    target->fix_k(source.get_current_k());
+    target->fix_kb(source.get_current_k(), source.get_current_b());
 }
 
 } // namespace
 
-TDElecSnap capture_td(const elecstate::fenergy& energy, const ModuleBase::matrix& eigenvalues, const Charge& charge)
+template <typename T, typename Device>
+void TDHistoryPW<T, Device>::restore(psi::Psi<T, Device> *current, elecstate::ElecState *estate, Charge *charge) const
 {
-    TDElecSnap state;
-    state.energy = energy;
-    state.eigenvalues = eigenvalues;
-    state.density.resize(charge.nspin * charge.nrxx);
-    for (int spin = 0; spin < charge.nspin; ++spin)
+    ModuleBase::timer::start("TDHistoryPW", "restore");
+    copy_wave(*previous_, current);
+    estate->f_en = energy_;
+    estate->ekb = ekb_;
+    // Discard the failed trial's potential correction before rebuilding a potential from the restored density.
+    estate->vnew_exist = false;
+    for (int spin = 0; spin < charge->nspin; ++spin)
     {
-        std::copy(charge.rho[spin], charge.rho[spin] + charge.nrxx, state.density.begin() + spin * charge.nrxx);
+        const double *density = rho_.data() + spin * charge->nrxx;
+        const double *end = density + charge->nrxx;
+        std::copy(density, end, charge->rho[spin]);
     }
-    return state;
-}
-
-void restore_td(const TDElecSnap& state, elecstate::fenergy& energy, ModuleBase::matrix& eigenvalues, Charge& charge)
-{
-    ModuleBase::timer::start("pw", "restore_td");
-    energy = state.energy;
-    eigenvalues = state.eigenvalues;
-    for (int spin = 0; spin < charge.nspin; ++spin)
-    {
-        const double* density = state.density.data() + spin * charge.nrxx;
-        std::copy(density, density + charge.nrxx, charge.rho[spin]);
-    }
-    charge.save_rho_before_sum_band();
-    ModuleBase::timer::end("pw", "restore_td");
+    charge->save_rho_before_sum_band();
+    ModuleBase::timer::end("TDHistoryPW", "restore");
 }
 
 template <typename T, typename Device>
-void TDHistoryPW<T, Device>::prepare(const elecstate::Potential& potential)
+void TDHistoryPW<T, Device>::prepare(const elecstate::Potential &potential)
 {
     ModuleBase::timer::start("TDHistoryPW", "prepare");
-    prepare_potential<Real, Device>(potential.get_veff_smooth(), &veff_prev_);
+    using CtDevice = typename ct::PsiToContainer<Device>::type;
+    const ct::DeviceType device = ct::DeviceTypeToEnum<CtDevice>::value;
+    const ModuleBase::matrix &shape = potential.get_veff_smooth();
+    const int64_t size = std::max<int64_t>(1, static_cast<int64_t>(shape.nr) * shape.nc);
+    // Reuse the potential snapshot buffer while its capacity, precision and device remain suitable.
+    if (veff_prev_.NumElements() < size || veff_prev_.data_type() != ct::DataTypeToEnum<Real>::value || veff_prev_.device_type() != device)
+    {
+        veff_prev_ = ct::Tensor(ct::DataTypeToEnum<Real>::value, device, {size});
+    }
     ModuleBase::timer::end("TDHistoryPW", "prepare");
 }
 
 template <typename T, typename Device>
-const typename GetTypeReal<T>::type* TDHistoryPW<T, Device>::left_potential() const
+const typename GetTypeReal<T>::type *TDHistoryPW<T, Device>::left_potential() const
 {
     return veff_prev_.template data<Real>();
 }
 
 template <typename T, typename Device>
-void TDHistoryPW<T, Device>::save(const psi::Psi<T, Device>& current, elecstate::Potential& potential)
+void TDHistoryPW<T, Device>::save(
+    const psi::Psi<T, Device> &current,
+    const elecstate::ElecState &estate,
+    const Charge &charge,
+    const unitcell::IonicState &ions,
+    bool save_retry)
 {
     ModuleBase::timer::start("TDHistoryPW", "save");
     if (!previous_)
     {
         previous_.reset(new psi::Psi<T, Device>(current));
     }
-    *previous_ = current;
-    ++generation_;
-    save_potential<Real, Device>(potential.get_veff_smooth(), potential.template get_veff_smooth_data<Real>(), &veff_prev_);
+    else
+    {
+        copy_wave(current, previous_.get());
+    }
+    ions_ = ions;
+    // Every step needs orbitals and the left potential; density and energy snapshots are needed when retries are enabled.
+    if (save_retry)
+    {
+        energy_ = estate.f_en;
+        ekb_ = estate.ekb;
+        rho_.resize(charge.nspin * charge.nrxx);
+        for (int spin = 0; spin < charge.nspin; ++spin)
+        {
+            const double *density = charge.rho[spin];
+            const double *end = density + charge.nrxx;
+            double *saved = rho_.data() + spin * charge.nrxx;
+            std::copy(density, end, saved);
+        }
+    }
+    const ModuleBase::matrix &shape = estate.pot->get_veff_smooth();
+    const Real *potential = estate.pot->template get_veff_smooth_data<Real>();
+    const int size = shape.nr * shape.nc;
+    // Copy the accepted potential on its device so the next corrector retains a fixed left endpoint.
+    if (size > 0)
+    {
+        base_device::memory::synchronize_memory_op<Real, Device, Device>()(veff_prev_.template data<Real>(), potential, size);
+    }
     ModuleBase::timer::end("TDHistoryPW", "save");
 }
 
 template <typename T, typename Device>
-const psi::Psi<T, Device>& TDHistoryPW<T, Device>::previous() const
+const psi::Psi<T, Device> &TDHistoryPW<T, Device>::previous() const
 {
     if (!previous_)
     {

@@ -1,11 +1,11 @@
-#include "source_base/global_function.h"
-#include "source_io/module_parameter/parameter.h"
-#include "stru_fac.h"
+#include "source_cell/stru_fac.h"
 #include "source_base/constants.h"
+#include "source_base/global_function.h"
+#include "source_base/libm/libm.h"
 #include "source_base/math_bspline.h"
 #include "source_base/memory_recorder.h"
 #include "source_base/timer.h"
-#include "source_base/libm/libm.h"
+#include "source_io/module_parameter/parameter.h"
 
 #include <vector>
 
@@ -16,7 +16,7 @@
 Structure_Factor::Structure_Factor()
 {
     // LCAO basis doesn't support GPU acceleration on this function currently.
-    if(PARAM.inp.basis_type == "pw")
+    if (PARAM.inp.basis_type == "pw")
     {
         this->device = PARAM.inp.device;
     }
@@ -43,9 +43,9 @@ Structure_Factor::~Structure_Factor()
 }
 
 // called in input.cpp
-void Structure_Factor::set(const ModulePW::PW_Basis* rho_basis_in, const int& nbspline_in)
+void Structure_Factor::set(const ModulePW::PW_Basis *rho_basis_in, const int &nbspline_in)
 {
-    ModuleBase::TITLE("Structure_Factor","set");
+    ModuleBase::TITLE("Structure_Factor", "set");
     this->rho_basis = rho_basis_in;
     this->nbspline = nbspline_in;
     return;
@@ -53,164 +53,187 @@ void Structure_Factor::set(const ModulePW::PW_Basis* rho_basis_in, const int& nb
 
 // Peize Lin optimize and add OpenMP 2021.04.01
 //  Calculate structure factor
-void Structure_Factor::setup(const UnitCell* Ucell,
-                             const Parallel_Grid& pgrid,
-                             const ModulePW::PW_Basis* rho_basis,
-                             const bool has_float_data)
+void Structure_Factor::setup(
+    const UnitCell *Ucell,
+    const Parallel_Grid &pgrid,
+    const ModulePW::PW_Basis *rho_basis,
+    const bool has_float_data)
 {
-    ModuleBase::TITLE("Structure_Factor","setup");
-    ModuleBase::timer::start("Structure_Factor","setup");
+    ModuleBase::TITLE("Structure_Factor", "setup");
+    ModuleBase::timer::start("Structure_Factor", "setup");
 
-    const std::complex<double> ci_tpi = ModuleBase::NEG_IMAG_UNIT * ModuleBase::TWO_PI;
-    this->ucell = Ucell;
-    this->strucFac.create(Ucell->ntype, rho_basis->npw);
-    ModuleBase::Memory::record("SF::strucFac", sizeof(std::complex<double>) * Ucell->ntype*rho_basis->npw);
+    // Keep full geometry initialization together while allowing RT callers to refresh its two parts independently.
+    cal_sf(*Ucell, pgrid, *rho_basis);
+    cal_phase(*Ucell, *rho_basis, has_float_data);
+    ModuleBase::timer::end("Structure_Factor", "setup");
+}
 
-//	std::string outstr;
-//	outstr = PARAM.globalv.global_out_dir + "strucFac.dat"; 
-//	std::ofstream ofs( outstr.c_str() ) ;
-	bool usebspline;
-	if(nbspline > 0) 
-	{   
-		usebspline = true;
-	} 
-	else 
-	{    
-		usebspline = false;
-	}
-    
-    if(usebspline)
+void Structure_Factor::cal_sf(const UnitCell &cell, const Parallel_Grid &grid, const ModulePW::PW_Basis &basis)
+{
+    // Sum atomic phases by element for the local ionic potential and nonlinear core density.
+    ModuleBase::timer::start("Structure_Factor", "cal_sf");
+    this->ucell = &cell;
+    const std::complex<double> phase = ModuleBase::NEG_IMAG_UNIT * ModuleBase::TWO_PI;
+    strucFac.create(cell.ntype, basis.npw);
+    ModuleBase::Memory::record("SF::strucFac", sizeof(std::complex<double>) * cell.ntype * basis.npw);
+    if (nbspline > 0)
     {
-        nbspline = int((nbspline+1)/2)*2; // nbspline must be a positive even number.
-        this->bspline_sf(nbspline, Ucell, pgrid, rho_basis);
+        nbspline = ((nbspline + 1) / 2) * 2;
+        bspline_sf(nbspline, &cell, grid, &basis);
     }
     else
     {
-        for (int it=0; it<Ucell->ntype; it++)
+        for (int it = 0; it < cell.ntype; ++it)
         {
-            const int na = Ucell->atoms[it].na;
-            const ModuleBase::Vector3<double> * const tau = Ucell->atoms[it].tau.data();
-            // Data race fix: cache shared data to local const variables before OpenMP parallel region
-            // TSan detected race condition when accessing rho_basis->npw and rho_basis->gcar directly
-            // in parallel loop, even though they are logically read-only
-            const int npw = rho_basis->npw;
-            const ModuleBase::Vector3<double> * const gcar = rho_basis->gcar;
+            const int na = cell.atoms[it].na;
+            const ModuleBase::Vector3<double> *tau = cell.atoms[it].tau.data();
+            const int npw = basis.npw;
+            const ModuleBase::Vector3<double> *gcar = basis.gcar;
 #ifdef _OPENMP
-            #pragma omp parallel for
+#pragma omp parallel for
 #endif
-            for (int ig=0; ig<npw; ig++)
+            for (int ig = 0; ig < npw; ++ig)
             {
-                const ModuleBase::Vector3<double> gcar_ig = gcar[ig];
-                std::complex<double> sum_phase = ModuleBase::ZERO;
-                for (int ia=0; ia<na; ia++)
+                const ModuleBase::Vector3<double> g = gcar[ig];
+                std::complex<double> sum = ModuleBase::ZERO;
+                for (int ia = 0; ia < na; ++ia)
                 {
-                    sum_phase += ModuleBase::libm::exp( ci_tpi * (gcar_ig * tau[ia]) );
+                    sum += ModuleBase::libm::exp(phase * (g * tau[ia]));
                 }
-                this->strucFac(it,ig) = sum_phase;
+                strucFac(it, ig) = sum;
             }
         }
     }
+    ModuleBase::timer::end("Structure_Factor", "cal_sf");
+}
 
-//	ofs.close();
+void Structure_Factor::cal_phase(const UnitCell &cell, const ModulePW::PW_Basis &basis, bool has_float)
+{
+    // Refresh per-atom projector phases independently so operator-time bindings retain endpoint structure factors.
+    ModuleBase::timer::start("Structure_Factor", "cal_phase");
+    this->ucell = &cell;
+    const std::complex<double> phase = ModuleBase::NEG_IMAG_UNIT * ModuleBase::TWO_PI;
+    eigts1.create(cell.nat, 2 * basis.nx + 1);
+    eigts2.create(cell.nat, 2 * basis.ny + 1);
+    eigts3.create(cell.nat, 2 * basis.nz + 1);
+    const int elements = eigts1.size + eigts2.size + eigts3.size;
+    ModuleBase::Memory::record("SF::eigts123", sizeof(std::complex<double>) * elements);
 
-    int i=0;
-    int j=0;
- 
-    this->eigts1.create(Ucell->nat, 2*rho_basis->nx + 1);
-    this->eigts2.create(Ucell->nat, 2*rho_basis->ny + 1);
-    this->eigts3.create(Ucell->nat, 2*rho_basis->nz + 1);
-
-    ModuleBase::Memory::record("SF::eigts123",sizeof(std::complex<double>) 
-    * (Ucell->nat*2 * (rho_basis->nx + rho_basis->ny + rho_basis->nz) + 3));
-
-    ModuleBase::Vector3<double> gtau;
-    int inat = 0;
-    for (i = 0; i < Ucell->ntype; i++)
+    int iat = 0;
+    for (int it = 0; it < cell.ntype; ++it)
     {
-        for (j = 0; j < Ucell->atoms[i].na;j++)
+        for (int ia = 0; ia < cell.atoms[it].na; ++ia, ++iat)
         {
-            gtau = Ucell->G * Ucell->atoms[i].tau[j];  //HLX: fixed on 10/13/2006
+            const ModuleBase::Vector3<double> gtau = cell.G * cell.atoms[it].tau[ia];
 #ifdef _OPENMP
 #pragma omp parallel
-{
-		    #pragma omp for schedule(static, 16)
-#endif
-            for (int n1 = -rho_basis->nx; n1 <= rho_basis->nx;n1++)
             {
-                double arg = n1 * gtau.x;
-                this->eigts1(inat, n1 + rho_basis->nx) = ModuleBase::libm::exp( ci_tpi*arg  );
-            }
-#ifdef _OPENMP
-		    #pragma omp for schedule(static, 16)
+#pragma omp for schedule(static, 16)
 #endif
-            for (int n2 = -rho_basis->ny; n2 <= rho_basis->ny;n2++)
-            {
-                double arg = n2 * gtau.y;
-                this->eigts2(inat, n2 + rho_basis->ny) = ModuleBase::libm::exp( ci_tpi*arg );
-            }
+                for (int n = -basis.nx; n <= basis.nx; ++n)
+                {
+                    const double arg = n * gtau.x;
+                    eigts1(iat, n + basis.nx) = ModuleBase::libm::exp(phase * arg);
+                }
 #ifdef _OPENMP
-		    #pragma omp for schedule(static, 16)
+#pragma omp for schedule(static, 16)
 #endif
-            for (int n3 = -rho_basis->nz; n3 <= rho_basis->nz;n3++)
-            {
-                double arg = n3 * gtau.z;
-                this->eigts3(inat, n3 + rho_basis->nz) = ModuleBase::libm::exp( ci_tpi*arg );
-            }
+                for (int n = -basis.ny; n <= basis.ny; ++n)
+                {
+                    const double arg = n * gtau.y;
+                    eigts2(iat, n + basis.ny) = ModuleBase::libm::exp(phase * arg);
+                }
 #ifdef _OPENMP
+#pragma omp for schedule(static, 16)
+#endif
+                for (int n = -basis.nz; n <= basis.nz; ++n)
+                {
+                    const double arg = n * gtau.z;
+                    eigts3(iat, n + basis.nz) = ModuleBase::libm::exp(phase * arg);
+                }
+#ifdef _OPENMP
+            }
+#endif
+        }
+    }
+    sync_phase(has_float);
+    ModuleBase::timer::end("Structure_Factor", "cal_phase");
 }
-#endif
-            inat++;
+
+void Structure_Factor::sync_phase(bool has_float_data)
+{
+    ModuleBase::timer::start("Structure_Factor", "sync_phase");
+    const ModuleBase::ComplexMatrix *phases[3] = {&eigts1, &eigts2, &eigts3};
+    std::complex<float> **floats[3] = {&c_eigts1, &c_eigts2, &c_eigts3};
+    std::complex<double> **doubles[3] = {&z_eigts1, &z_eigts2, &z_eigts3};
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        const int size = phases[axis]->size;
+        // Reuse conversion and device buffers across ionic updates while the phase-table dimensions stay fixed.
+        const bool resized = phase_size_[axis] != size;
+        if (resized)
+        {
+            if (device == "gpu")
+            {
+                delmem_cd_op()(*floats[axis]);
+                delmem_zd_op()(*doubles[axis]);
+                *doubles[axis] = nullptr;
+            }
+            else
+            {
+                delmem_ch_op()(*floats[axis]);
+            }
+            *floats[axis] = nullptr;
+            phase_size_[axis] = size;
+        }
+        if (device == "gpu")
+        {
+            if (*doubles[axis] == nullptr)
+            {
+                resmem_zd_op()(*doubles[axis], size);
+            }
+            syncmem_z2z_h2d_op()(*doubles[axis], phases[axis]->c, size);
+            if (has_float_data)
+            {
+                if (*floats[axis] == nullptr)
+                {
+                    resmem_cd_op()(*floats[axis], size);
+                }
+                castmem_z2c_h2d_op()(*floats[axis], phases[axis]->c, size);
+            }
+        }
+        else
+        {
+            // CPU double precision aliases the matrix storage; float and device data require refreshed copies.
+            *doubles[axis] = phases[axis]->c;
+            if (has_float_data)
+            {
+                if (*floats[axis] == nullptr)
+                {
+                    resmem_ch_op()(*floats[axis], size);
+                }
+                castmem_z2c_h2h_op()(*floats[axis], phases[axis]->c, size);
+            }
         }
     }
-    
-    if (device == "gpu") {
-        if (has_float_data) {
-            resmem_cd_op()(this->c_eigts1, Ucell->nat * (2 * rho_basis->nx + 1));
-            resmem_cd_op()(this->c_eigts2, Ucell->nat * (2 * rho_basis->ny + 1));
-            resmem_cd_op()(this->c_eigts3, Ucell->nat * (2 * rho_basis->nz + 1));
-            castmem_z2c_h2d_op()(this->c_eigts1, this->eigts1.c, Ucell->nat * (2 * rho_basis->nx + 1));
-            castmem_z2c_h2d_op()(this->c_eigts2, this->eigts2.c, Ucell->nat * (2 * rho_basis->ny + 1));
-            castmem_z2c_h2d_op()(this->c_eigts3, this->eigts3.c, Ucell->nat * (2 * rho_basis->nz + 1));
-        }
-        resmem_zd_op()(this->z_eigts1, Ucell->nat * (2 * rho_basis->nx + 1));
-        resmem_zd_op()(this->z_eigts2, Ucell->nat * (2 * rho_basis->ny + 1));
-        resmem_zd_op()(this->z_eigts3, Ucell->nat * (2 * rho_basis->nz + 1));
-        syncmem_z2z_h2d_op()(this->z_eigts1, this->eigts1.c, Ucell->nat * (2 * rho_basis->nx + 1));
-        syncmem_z2z_h2d_op()(this->z_eigts2, this->eigts2.c, Ucell->nat * (2 * rho_basis->ny + 1));
-        syncmem_z2z_h2d_op()(this->z_eigts3, this->eigts3.c, Ucell->nat * (2 * rho_basis->nz + 1));
-    }
-    else {
-        if (has_float_data) {
-            resmem_ch_op()(this->c_eigts1, Ucell->nat * (2 * rho_basis->nx + 1));
-            resmem_ch_op()(this->c_eigts2, Ucell->nat * (2 * rho_basis->ny + 1));
-            resmem_ch_op()(this->c_eigts3, Ucell->nat * (2 * rho_basis->nz + 1));
-            castmem_z2c_h2h_op()(this->c_eigts1, this->eigts1.c, Ucell->nat * (2 * rho_basis->nx + 1));
-            castmem_z2c_h2h_op()(this->c_eigts2, this->eigts2.c, Ucell->nat * (2 * rho_basis->ny + 1));
-            castmem_z2c_h2h_op()(this->c_eigts3, this->eigts3.c, Ucell->nat * (2 * rho_basis->nz + 1));
-        }
-        this->z_eigts1 = this->eigts1.c;
-        this->z_eigts2 = this->eigts2.c;
-        this->z_eigts3 = this->eigts3.c;
-        // There's no need to delete double precision pointers while in a CPU environment.
-    }
-    ModuleBase::timer::end("Structure_Factor","setup");
-    return;
+    ModuleBase::timer::end("Structure_Factor", "sync_phase");
 }
 
 //
-//DESCRIPTION:
+// DESCRIPTION:
 //    Calculate structure factor with Cardinal B-spline interpolation
 //    Ref: J. Chem. Phys. 103, 8577 (1995)
 //    qianrui create 2021-9-17
-//INPUT LIST:
+// INPUT LIST:
 //    norder: the order of Cardinal B-spline base functions
-//FURTHER OPTIMIZATION:
+// FURTHER OPTIMIZATION:
 //    1. Use "r2c" fft
 //
-void Structure_Factor::bspline_sf(const int norder,
-                                  const UnitCell* Ucell,
-                                  const Parallel_Grid& pgrid,
-                                  const ModulePW::PW_Basis* rho_basis)
+void Structure_Factor::bspline_sf(
+    const int norder,
+    const UnitCell *Ucell,
+    const Parallel_Grid &pgrid,
+    const ModulePW::PW_Basis *rho_basis)
 {
     (void)pgrid;
     std::vector<double> tmpr(rho_basis->nrxx);
@@ -224,7 +247,7 @@ void Structure_Factor::bspline_sf(const int norder,
     for (int it = 0; it < Ucell->ntype; it++)
     {
         const int na = Ucell->atoms[it].na;
-        const ModuleBase::Vector3<double>* const taud = Ucell->atoms[it].taud.data();
+        const ModuleBase::Vector3<double> *const taud = Ucell->atoms[it].taud.data();
         ModuleBase::GlobalFunc::ZEROS(tmpr.data(), rho_basis->nrxx);
 
 #ifdef _OPENMP
@@ -238,7 +261,7 @@ void Structure_Factor::bspline_sf(const int norder,
             const double dx = gridx - floor(gridx);
             const double dy = gridy - floor(gridy);
             const double dz = gridz - floor(gridz);
-            //I'm not sure if there is a mod function for double data
+            // I'm not sure if there is a mod function for double data
 
             ModuleBase::Bspline bsx, bsy, bsz;
             bsx.init(norder, 1, 0);
@@ -265,22 +288,16 @@ void Structure_Factor::bspline_sf(const int norder,
 #ifdef _OPENMP
 #pragma omp atomic
 #endif
-                        tmpr[(icx * rho_basis->ny + icy) * nplane + local_z]
-                            += bsz.bezier_ele(iz) * bsy.bezier_ele(iy) * bsx.bezier_ele(ix);
+                        tmpr[(icx * rho_basis->ny + icy) * nplane + local_z] +=
+                            bsz.bezier_ele(iz) * bsy.bezier_ele(iy) * bsx.bezier_ele(ix);
                     }
                 }
             }
         }
 
-        //It should be optimized with r2c
+        // It should be optimized with r2c
         rho_basis->real2recip(tmpr.data(), &strucFac(it, 0));
-        this->bsplinecoef(b1.data(),
-                          b2.data(),
-                          b3.data(),
-                          rho_basis->nx,
-                          rho_basis->ny,
-                          rho_basis->nz,
-                          norder);
+        this->bsplinecoef(b1.data(), b2.data(), b3.data(), rho_basis->nx, rho_basis->ny, rho_basis->nz, norder);
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static, 128)
 #endif
@@ -296,8 +313,14 @@ void Structure_Factor::bspline_sf(const int norder,
     return;
 }
 
-void Structure_Factor::bsplinecoef(std::complex<double> *b1, std::complex<double> *b2, std::complex<double> *b3, 
-                        const int nx, const int ny, const int nz, const int norder)
+void Structure_Factor::bsplinecoef(
+    std::complex<double> *b1,
+    std::complex<double> *b2,
+    std::complex<double> *b3,
+    const int nx,
+    const int ny,
+    const int nz,
+    const int norder)
 {
     const std::complex<double> ci_tpi = ModuleBase::NEG_IMAG_UNIT * ModuleBase::TWO_PI;
     ModuleBase::Bspline bsp;
@@ -305,76 +328,76 @@ void Structure_Factor::bsplinecoef(std::complex<double> *b1, std::complex<double
     bsp.getbspline(1.0);
 #ifdef _OPENMP
 #pragma omp parallel
-{
-	#pragma omp for schedule(static, 16)
-#endif
-    for(int ix = 0 ; ix < nx ; ++ix)
     {
-        std::complex<double> fracx=0;
-        for(int io = 0 ; io < norder ; ++io)
-        {
-            fracx += bsp.bezier_ele(io)*ModuleBase::libm::exp(ci_tpi*double(ix)/double(nx)*double(io));
-        }
-        b1[ix] = ModuleBase::libm::exp(ci_tpi*double(norder*ix)/double(nx))/fracx;
-    }
-#ifdef _OPENMP
-	#pragma omp for schedule(static, 16)
+#pragma omp for schedule(static, 16)
 #endif
-    for(int iy = 0 ; iy < ny ; ++iy)
-    {
-        std::complex<double> fracy=0;
-        for(int io = 0 ; io < norder ; ++io)
+        for (int ix = 0; ix < nx; ++ix)
         {
-            fracy += bsp.bezier_ele(io)*ModuleBase::libm::exp(ci_tpi*double(iy)/double(ny)*double(io));
+            std::complex<double> fracx = 0;
+            for (int io = 0; io < norder; ++io)
+            {
+                fracx += bsp.bezier_ele(io) * ModuleBase::libm::exp(ci_tpi * double(ix) / double(nx) * double(io));
+            }
+            b1[ix] = ModuleBase::libm::exp(ci_tpi * double(norder * ix) / double(nx)) / fracx;
         }
-        b2[iy] = ModuleBase::libm::exp(ci_tpi*double(norder*iy)/double(ny))/fracy;
-    }
 #ifdef _OPENMP
-	#pragma omp for schedule(static, 16)
+#pragma omp for schedule(static, 16)
 #endif
-    for(int iz = 0 ; iz < nz ; ++iz)
-    {
-        std::complex<double> fracz=0;
-        for(int io = 0 ; io < norder ; ++io)
+        for (int iy = 0; iy < ny; ++iy)
         {
-            fracz += bsp.bezier_ele(io)*ModuleBase::libm::exp(ci_tpi*double(iz)/double(nz)*double(io));
+            std::complex<double> fracy = 0;
+            for (int io = 0; io < norder; ++io)
+            {
+                fracy += bsp.bezier_ele(io) * ModuleBase::libm::exp(ci_tpi * double(iy) / double(ny) * double(io));
+            }
+            b2[iy] = ModuleBase::libm::exp(ci_tpi * double(norder * iy) / double(ny)) / fracy;
         }
-        b3[iz] = ModuleBase::libm::exp(ci_tpi*double(norder*iz)/double(nz))/fracz;
-    }
 #ifdef _OPENMP
-}
+#pragma omp for schedule(static, 16)
+#endif
+        for (int iz = 0; iz < nz; ++iz)
+        {
+            std::complex<double> fracz = 0;
+            for (int io = 0; io < norder; ++io)
+            {
+                fracz += bsp.bezier_ele(io) * ModuleBase::libm::exp(ci_tpi * double(iz) / double(nz) * double(io));
+            }
+            b3[iz] = ModuleBase::libm::exp(ci_tpi * double(norder * iz) / double(nz)) / fracz;
+        }
+#ifdef _OPENMP
+    }
 #endif
 }
 
 template <>
-std::complex<float> * Structure_Factor::get_eigts1_data() const
+std::complex<float> *Structure_Factor::get_eigts1_data() const
 {
     return this->c_eigts1;
 }
 template <>
-std::complex<double> * Structure_Factor::get_eigts1_data() const
+std::complex<double> *Structure_Factor::get_eigts1_data() const
 {
     return this->z_eigts1;
 }
 
 template <>
-std::complex<float> * Structure_Factor::get_eigts2_data() const
+std::complex<float> *Structure_Factor::get_eigts2_data() const
 {
     return this->c_eigts2;
 }
 template <>
-std::complex<double> * Structure_Factor::get_eigts2_data() const
+std::complex<double> *Structure_Factor::get_eigts2_data() const
 {
     return this->z_eigts2;
 }
 
 template <>
-std::complex<float> * Structure_Factor::get_eigts3_data() const
+std::complex<float> *Structure_Factor::get_eigts3_data() const
 {
     return this->c_eigts3;
 }
 template <>
-std::complex<double> * Structure_Factor::get_eigts3_data() const
+std::complex<double> *Structure_Factor::get_eigts3_data() const
 {
     return this->z_eigts3;
 }

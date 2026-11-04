@@ -1,32 +1,41 @@
 #include "source_pw/module_rt/td_hamilt_pw.h"
+#include "source_pw/module_rt/td_ion_pw.h"
 
 namespace pw
 {
 template <typename T, typename Device>
-TDHamiltPW<T, Device>::TDHamiltPW(hamilt::HamiltPW<T, Device>& hamilt, const ModulePW::PW_Basis_K& basis)
-    : hamilt_(hamilt), op_(&hamilt, &basis)
+TDHamiltPW<T, Device>::TDHamiltPW(hamilt::HamiltPW<T, Device> *hamilt, const ModulePW::PW_Basis_K &basis, TDIonPW *ions)
+    : hamilt_(*hamilt), op_(hamilt, &basis), ions_(*ions)
 {
 }
 template <typename T, typename Device>
-void TDHamiltPW<T, Device>::bind(const Real* veff, const ModuleBase::Vector3<double>& vecpot_ha)
+void TDHamiltPW<T, Device>::bind(const Real *veff, const ModuleBase::Vector3<double> &vecpot_ha, const unitcell::IonicState &state)
 {
-    veff_ = veff;
-    vecpot_ha_ = vecpot_ha;
-    hamilt_.bind_td_state(veff_, vecpot_ha_);
+    // Bind geometry, local potential and vector potential together before the solver applies this operator.
+    ions_.bind(state);
+    hamilt_.bind_td_state(veff, vecpot_ha);
 }
 template <typename T, typename Device>
 void TDHamiltPW<T, Device>::update_k(int ik)
 {
-    hamilt_.bind_td_state(veff_, vecpot_ha_);
+    // Reuse the PW operator's k-point update to rebuild projectors for the currently bound geometry and field.
     op_.update_k(ik);
 }
 template <typename T, typename Device>
-void TDHamiltPW<T, Device>::hpsi(const T* x, T* hx, int ld, int bands) const
+void TDHamiltPW<T, Device>::hpsi(
+    const T *x,
+    T *hx,
+    int ld,
+    int bands) const
 {
     op_.hpsi(x, hx, ld, bands);
 }
 template <typename T, typename Device>
-void TDHamiltPW<T, Device>::spsi(const T* x, T* sx, int ld, int bands) const
+void TDHamiltPW<T, Device>::spsi(
+    const T *x,
+    T *sx,
+    int ld,
+    int bands) const
 {
     op_.spsi(x, sx, ld, bands);
 }

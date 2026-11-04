@@ -1,4 +1,4 @@
-#include "chg_tools.h"
+#include "source_estate/module_charge/chg_tools.h"
 
 #include <algorithm>
 #include <functional>
@@ -255,48 +255,30 @@ void non_linear_core_correction(const NlcCtx& ctx,
     return;
 }
 
-// computes the core charge on the real space 3D mesh.
-void set_rho_core(const UnitCell& ucell,
-                  const ModuleBase::ComplexMatrix& structure_factor,
+// Cache element radial Fourier transforms for reuse as ions move on a fixed cell and reciprocal grid.
+void cal_core_rad(const UnitCell& ucell,
                   const bool* numeric,
-                  double* rho_core,
-                  std::complex<double>* rhog_core,
-                  const ModulePW::PW_Basis& rhopw)
+                  const ModulePW::PW_Basis& rhopw,
+                  ModuleBase::matrix* core_rad)
 {
-    ModuleBase::TITLE("module_charge", "set_rho_core");
-    ModuleBase::timer::start("module_charge", "set_rho_core");
-
-    bool bl = false;
-    for (int it = 0; it < ucell.ntype; it++)
+    ModuleBase::timer::start("module_charge", "cal_core_rad");
+    bool has_core = false;
+    for (int it = 0; it < ucell.ntype; ++it)
     {
-        if (ucell.atoms[it].ncpp.nlcc)
-        {
-            bl = true;
-            break;
-        }
+        has_core = has_core || ucell.atoms[it].ncpp.nlcc;
     }
-
-    if (!bl)
+    if (!has_core)
     {
-        std::fill(rho_core, rho_core + rhopw.nrxx, 0.0);
-        ModuleBase::timer::end("module_charge", "set_rho_core");
+        core_rad->create(0, 0);
+        ModuleBase::timer::end("module_charge", "cal_core_rad");
         return;
     }
-
-    std::vector<double> rhocg(rhopw.ngg, 0.0);
-
-    // three dimension.
-    std::vector<std::complex<double>> vg(rhopw.npw);
-
-    for (int it = 0; it < ucell.ntype; it++)
+    core_rad->create(ucell.ntype, rhopw.ngg);
+    for (int it = 0; it < ucell.ntype; ++it)
     {
         if (ucell.atoms[it].ncpp.nlcc)
         {
             assert(numeric != nullptr);
-//----------------------------------------------------------
-// EXPLAIN : drhoc compute the radial fourier transform for
-// each shell of g vec
-//----------------------------------------------------------
             NlcCtx nlc_ctx{
                 numeric[it],
                 ucell.omega,
@@ -308,13 +290,41 @@ void set_rho_core(const UnitCell& ucell,
                 rhopw.gg_uniq,
                 rhopw.ngg
             };
-            non_linear_core_correction(nlc_ctx, rhocg.data());
-//----------------------------------------------------------
-// EXPLAIN : multiply by the structure factor and sum
-//----------------------------------------------------------
-            for (int ig = 0; ig < rhopw.npw; ig++)
+            non_linear_core_correction(nlc_ctx, &(*core_rad)(it, 0));
+        }
+    }
+    ModuleBase::timer::end("module_charge", "cal_core_rad");
+}
+
+void set_rho_core(const UnitCell& ucell,
+                  const ModuleBase::ComplexMatrix& structure_factor,
+                  const ModuleBase::matrix& core_rad,
+                  double* rho_core,
+                  std::complex<double>* rhog_core,
+                  const ModulePW::PW_Basis& rhopw)
+{
+    ModuleBase::TITLE("module_charge", "set_rho_core");
+    ModuleBase::timer::start("module_charge", "set_rho_core");
+    bool has_core = false;
+    for (int it = 0; it < ucell.ntype; ++it)
+    {
+        has_core = has_core || ucell.atoms[it].ncpp.nlcc;
+    }
+    if (!has_core)
+    {
+        std::fill(rho_core, rho_core + rhopw.nrxx, 0.0);
+        ModuleBase::timer::end("module_charge", "set_rho_core");
+        return;
+    }
+    // Apply the current ionic structure factors to cached radial data before transforming the core density to real space.
+    std::vector<std::complex<double>> vg(rhopw.npw);
+    for (int it = 0; it < ucell.ntype; ++it)
+    {
+        if (ucell.atoms[it].ncpp.nlcc)
+        {
+            for (int ig = 0; ig < rhopw.npw; ++ig)
             {
-                vg[ig] += structure_factor(it, ig) * rhocg[rhopw.ig2igg[ig]];
+                vg[ig] += structure_factor(it, ig) * core_rad(it, rhopw.ig2igg[ig]);
             }
         }
     }

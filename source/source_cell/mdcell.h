@@ -60,6 +60,14 @@ public:
     /// Copy state; mark a position update only when requested, otherwise preserve the flag.
     void sync_backing_unitcell(const bool positions_updated);
 
+    /// Collect owned atom fields in type-major order for synchronization and read-only sampling.
+    void collect_md(std::vector<double>* cart,
+                    std::vector<double>* frac,
+                    std::vector<double>* vel,
+                    std::vector<double>* disp,
+                    std::vector<int>* shift,
+                    std::vector<int>* mbl) const;
+
     std::vector<LocalAtom>& owned_atoms() { return owned_atoms_; }
     const std::vector<LocalAtom>& owned_atoms() const { return owned_atoms_; }
     std::vector<LocalAtom>& ghost_atoms() { return ghost_atoms_; }

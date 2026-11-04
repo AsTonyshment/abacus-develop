@@ -2,6 +2,7 @@
 
 #include "source_base/parallel_device.h"
 #include "source_base/tool_quit.h"
+#include "source_pw/module_rt/td_ion_pw.h"
 
 #include <iostream>
 #include <sstream>
@@ -9,11 +10,12 @@
 namespace pw
 {
 template <typename T, typename Device>
-ETRSPropPW<T, Device>::ETRSPropPW(const hsolver::ExpControls& exp_ctrl,
-                                  int npol,
-                                  const std::vector<int>& global_k,
-                                  const hsolver::diag_comm_info& comm,
-                                  std::ostream& log)
+ETRSPropPW<T, Device>::ETRSPropPW(
+    const hsolver::ExpControls &exp_ctrl,
+    int npol,
+    const std::vector<int> &global_k,
+    const hsolver::diag_comm_info &comm,
+    std::ostream &log)
     : pool_comm_(comm), npol_(npol), global_k_(global_k), log_(log)
 {
     exponential_ = hsolver::make_exp_action<T, Device>(exp_ctrl, comm);
@@ -32,23 +34,17 @@ ETRSPropPW<T, Device>::ETRSPropPW(const hsolver::ExpControls& exp_ctrl,
 template <typename T, typename Device>
 void ETRSPropPW<T, Device>::begin_trial()
 {
+    // Recompute the left half-step when a retry changes the interval duration or accepted starting state.
     half_ready_ = false;
 }
 
 template <typename T, typename Device>
-void ETRSPropPW<T, Device>::discard_trial()
-{
-    half_ready_ = false;
-}
-
-template <typename T, typename Device>
-void ETRSPropPW<T, Device>::invalidate_basis()
-{
-    half_ready_ = false;
-}
-
-template <typename T, typename Device>
-void ETRSPropPW<T, Device>::report(const hsolver::ExpResult& result, int ik, int elec_step, int scf_iter, bool log_detail) const
+void ETRSPropPW<T, Device>::report(
+    const hsolver::ExpResult &result,
+    int ik,
+    int elec_step,
+    int scf_iter,
+    bool log_detail) const
 {
     std::ostringstream text;
     text << " PW ETRS exponential: step=" << elec_step << " scf_iter=" << scf_iter << " global_k=" << global_k_.at(ik) + 1
@@ -82,23 +78,28 @@ void ETRSPropPW<T, Device>::report(const hsolver::ExpResult& result, int ik, int
 }
 
 template <typename T, typename Device>
-void ETRSPropPW<T, Device>::evolve(TDHamiltPW<T, Device>& hamilt,
-                                   const TDHistoryPW<T, Device>& history,
-                                   elecstate::Potential& potential,
-                                   const elecstate::TDFieldManager& field,
-                                   psi::Psi<T, Device>* current,
-                                   int elec_step,
-                                   int scf_iter,
-                                   bool log_detail)
+void ETRSPropPW<T, Device>::evolve(
+    TDHamiltPW<T, Device> *hamilt,
+    const TDHistoryPW<T, Device> &history,
+    const typename GetTypeReal<T>::type *veff,
+    int nveff,
+    const elecstate::TDFieldManager &field,
+    const unitcell::IonicState &sample,
+    const unitcell::IonicState &right,
+    psi::Psi<T, Device> *current,
+    int elec_step,
+    int scf_iter,
+    bool log_detail)
 {
     using Real = typename T::value_type;
     const bool predictor = scf_iter == 1;
-    const psi::Psi<T, Device>& previous = history.previous();
+    const psi::Psi<T, Device> &previous = history.previous();
     const int ld = current->get_nbasis();
     const int bands = current->get_nbands();
     const int64_t stride = static_cast<int64_t>(ld) * bands;
     if (predictor)
     {
+        // Cache the left half-step once per trial; all correctors share the same accepted left Hamiltonian.
         const int64_t size = stride * current->get_nk();
         if (half_psi_.NumElements() < size)
         {
@@ -106,36 +107,40 @@ void ETRSPropPW<T, Device>::evolve(TDHamiltPW<T, Device>& hamilt,
             half_psi_ = ct::Tensor();
         }
         hsolver::linear_buffer<T, Device>(&half_psi_, size);
-        left_gen_ = history.generation();
-        hamilt.bind(history.left_potential(), field.A_left_ha());
+        const Real *left_potential = history.left_potential();
+        const ModuleBase::Vector3<double> &left_field = field.A_left_ha();
+        hamilt->bind(left_potential, left_field, sample);
     }
     else
     {
-        if (!half_ready_ || left_gen_ != history.generation())
+        if (!half_ready_)
         {
             ModuleBase::WARNING_QUIT("ETRSPropPW", "Missing left half-step for the current trial.");
         }
-        const Real* endpoint = potential.template get_veff_smooth_data<Real>();
-        hamilt.bind(endpoint, field.A_right_ha());
+        const ModuleBase::Vector3<double> &right_field = field.A_right_ha();
+        // Complete the cached left half-step using the current right-endpoint potential, field and ions.
+        hamilt->bind(veff, right_field, right);
     }
+    // A half-step in Hartree atomic time contributes dt/4 to the exponential of a Hamiltonian stored in Ry.
     const double alpha = field.interval_dt_ha() / 4.0;
     for (int ik = 0; ik < current->get_nk(); ++ik)
     {
-        hamilt.update_k(ik);
+        hamilt->update_k(ik);
         current->fix_k(ik);
         previous.fix_k(ik);
         const hsolver::OrbLayout layout{ld, current->get_ngk(ik), npol_, bands};
-        T* output = current->get_pointer();
-        T* half = half_psi_.template data<T>() + ik * stride;
+        T *output = current->get_pointer();
+        T *half = half_psi_.template data<T>() + ik * stride;
         hsolver::ExpResult result;
         if (predictor)
         {
-            const T* input = previous.get_pointer();
-            result = exponential_->apply_pair(hamilt, layout, alpha, input, half, output);
+            // Generate both the reusable half-step and a full-step density predictor from the left Hamiltonian.
+            const T *input = previous.get_pointer();
+            result = exponential_->apply_pair(*hamilt, layout, alpha, input, half, output);
         }
         else
         {
-            result = exponential_->apply(hamilt, layout, alpha, half, output);
+            result = exponential_->apply(*hamilt, layout, alpha, half, output);
         }
         report(result, ik, elec_step, scf_iter, log_detail);
     }
