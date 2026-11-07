@@ -33,6 +33,7 @@ TDVelResultPW TDVelPW<Real, Device>::calculate(
     const elecstate::ElecState &state,
     const ModuleBase::Vector3<double> &a,
     const ModuleBase::Vector3<double> &nonlocal_a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel,
     const CurrentRequest &request)
 {
     ModuleBase::timer::start("TDVelPW", "calculate");
@@ -100,7 +101,7 @@ TDVelResultPW TDVelPW<Real, Device>::calculate(
         {
             Zero()(vpsi, 0, vel_size);
         }
-        vel_->init(ik, a, nonlocal_a);
+        vel_->init(ik, a, nonlocal_a, ion_vel);
         vel_->act(&psi, ncols, data, vpsi, false);
         if (npw == 0)
         {

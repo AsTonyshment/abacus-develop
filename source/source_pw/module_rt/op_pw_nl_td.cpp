@@ -52,8 +52,8 @@ void TDNonlocalPW<T, Device>::init(const int ik_in)
             resmem_complex_op()(this->vkb_td, projector_elements, "TDNL::vkb_td");
         }
 
-        // Generate projectors shifted by the current vector potential.
-        this->ppcell->getvnl(this->ctx, *this->ucell, this->ik, this->A_ha_, this->vkb_td, this->wfcpw->npwk_max);
+        // Generate projectors with the field and atomic velocities of the currently bound sample.
+        this->ppcell->getvnl(this->ctx, *this->ucell, this->ik, this->A_ha_, this->ion_vel_, this->vkb_td, this->wfcpw->npwk_max);
     }
 
     if (this->next_op != nullptr)

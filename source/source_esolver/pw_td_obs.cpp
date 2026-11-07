@@ -10,6 +10,7 @@
 #include "source_io/module_energy/td_eij_pw.h"
 #include "source_io/module_output/td_conserv_io.h"
 #include "source_io/module_parameter/parameter.h"
+#include "source_pw/module_rt/td_pw.h"
 
 #include <iostream>
 
@@ -55,13 +56,24 @@ void ESolver_KS_PW_TDDFT<T, Device>::out_td(
         {
             nonlocal_a = vecpot;
         }
-        // Evaluate observables with the accepted endpoint geometry and field before passing results to IO.
-        const pw::TDVelResultPW currents = vel_.calculate(current, *this->pelec, vecpot, nonlocal_a, current_req_);
+        // Evaluate observables with the accepted endpoint geometry, field and nuclear velocities.
+        const std::vector<ModuleBase::Vector3<double>> ion_vel = pw::td_ion_vel(ucell, this->inp_->td_nl_motion);
+        // Sample the nuclear derivative of the propagated nonlocal energy independently of current-output switches.
+        if (this->inp_->vnl_in_h)
+        {
+            ion_pi_ = pi_calc_.cal_pi(ucell, *this->pw_wfc, this->kv, &this->ppcell, current, this->pelec->wg, nonlocal_a, ion_vel);
+        }
+        else
+        {
+            // A Hamiltonian without its nonlocal term has no nuclear velocity derivative.
+            ion_pi_.create(ucell.nat, 3);
+        }
+        const pw::TDVelResultPW currents = vel_.calculate(current, *this->pelec, vecpot, nonlocal_a, ion_vel, current_req_);
 
         pw::TDSpinResultPW moments;
         if (this->inp_->nspin == 4 && (this->inp_->td_out_mag != "none" || this->inp_->td_out_torque))
         {
-            moments = spin_.calculate(current, *this->pelec, vecpot, nonlocal_a);
+            moments = spin_.calculate(current, *this->pelec, vecpot, nonlocal_a, ion_vel);
         }
 
         const double dt_ha = this->field_->dt_ha();

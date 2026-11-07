@@ -9,14 +9,15 @@ namespace hamilt
 {
 
 template <typename FPTYPE, typename Device>
-Velocity<FPTYPE, Device>::Velocity(const ModulePW::PW_Basis_K* wfcpw_in,
-                                   const int* isk_in,
-                                   pseudopot_cell_vnl* ppcell_in,
-                                   const UnitCell* ucell_in,
-                                   const bool nonlocal_in,
-                                   const typename GetTypeReal<FPTYPE>::type* vtau_in,
-                                   const int vtau_col_in,
-                                   const int vtau_row_in)
+Velocity<FPTYPE, Device>::Velocity(
+    const ModulePW::PW_Basis_K *wfcpw_in,
+    const int *isk_in,
+    pseudopot_cell_vnl *ppcell_in,
+    const UnitCell *ucell_in,
+    const bool nonlocal_in,
+    const typename GetTypeReal<FPTYPE>::type *vtau_in,
+    const int vtau_col_in,
+    const int vtau_row_in)
 {
     if (wfcpw_in == nullptr || isk_in == nullptr || ppcell_in == nullptr || ucell_in == nullptr)
     {
@@ -52,15 +53,17 @@ Velocity<FPTYPE, Device>::~Velocity()
 template <typename FPTYPE, typename Device>
 void Velocity<FPTYPE, Device>::init(const int ik_in)
 {
-    // The kinetic and nonlocal vector potential arguments are only needed by RT-TDDFT.
+    // Zero fields and empty velocities retain the ground-state operator; the added shifts serve RT-TDDFT.
     const ModuleBase::Vector3<double> zero{0.0, 0.0, 0.0};
-    this->init(ik_in, zero, zero);
+    this->init(ik_in, zero, zero, {});
 }
 
 template <typename FPTYPE, typename Device>
-void Velocity<FPTYPE, Device>::init(const int ik_in,
-                                    const ModuleBase::Vector3<double>& vector_potential,
-                                    const ModuleBase::Vector3<double>& nonlocal_a)
+void Velocity<FPTYPE, Device>::init(
+    const int ik_in,
+    const ModuleBase::Vector3<double> &vector_potential,
+    const ModuleBase::Vector3<double> &nonlocal_a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel)
 {
     ModuleBase::timer::start("Velocity", "init");
     this->ik = ik_in;
@@ -76,7 +79,7 @@ void Velocity<FPTYPE, Device>::init(const int ik_in,
         resmem_var_op()(gz_, npw);
         momentum_capacity_ = npw;
     }
-    std::vector<FPTYPE*> gtmp_ptr = {this->gx_, this->gy_, this->gz_};
+    std::vector<FPTYPE *> gtmp_ptr = {this->gx_, this->gy_, this->gz_};
     for (int i = 0; i < 3; ++i)
     {
         for (int ig = 0; ig < npw; ++ig)
@@ -103,19 +106,20 @@ void Velocity<FPTYPE, Device>::init(const int ik_in,
             resmem_complex_op()(gradvkb_, gradient_elements);
             projector_capacity_ = projector_elements;
         }
-        // RT-TDDFT selects the nonlocal momentum shift independently of the kinetic shift.
-        this->ppcell->getvnl(this->ctx, *this->ucell, ik_in, nonlocal_a, vkb_, npwk_max);
-        this->gradient_.calculate(this->ppcell, *this->ucell, *this->wfcpw, ik_in, nonlocal_a, gradvkb_);
+        // RT-TDDFT supplies matching field and nuclear velocity shifts for beta and its gradient in the nonlocal commutator.
+        this->ppcell->getvnl(this->ctx, *this->ucell, ik_in, nonlocal_a, ion_vel, vkb_, npwk_max);
+        this->gradient_.calculate(this->ppcell, *this->ucell, *this->wfcpw, ik_in, nonlocal_a, ion_vel, gradvkb_);
     }
     ModuleBase::timer::end("Velocity", "init");
 }
 
 template <typename FPTYPE, typename Device>
-void Velocity<FPTYPE, Device>::act(const psi::Psi<std::complex<FPTYPE>, Device>* psi_in,
-                                   const int n_npwx,
-                                   const std::complex<FPTYPE>* psi0,
-                                   std::complex<FPTYPE>* vpsi,
-                                   const bool add) const
+void Velocity<FPTYPE, Device>::act(
+    const psi::Psi<std::complex<FPTYPE>, Device> *psi_in,
+    const int n_npwx,
+    const std::complex<FPTYPE> *psi0,
+    std::complex<FPTYPE> *vpsi,
+    const bool add) const
 {
     ModuleBase::timer::start("Operator", "Velocity");
 
@@ -125,14 +129,14 @@ void Velocity<FPTYPE, Device>::act(const psi::Psi<std::complex<FPTYPE>, Device>*
     const int npol = psi_in->get_npol();
     using Real = typename GetTypeReal<FPTYPE>::type;
 
-    std::vector<FPTYPE*> gtmp_ptr = {this->gx_, this->gy_, this->gz_};
+    std::vector<FPTYPE *> gtmp_ptr = {this->gx_, this->gy_, this->gz_};
     // -------------
     //       p
     // -------------
     for (int id = 0; id < 3; ++id)
     {
-        const Complex* tmpsi_in = psi0;
-        Complex* tmpvpsi = vpsi + id * component_elements;
+        const Complex *tmpsi_in = psi0;
+        Complex *tmpvpsi = vpsi + id * component_elements;
         for (int ib = 0; npw > 0 && ib < n_npwx; ++ib)
         {
             ModuleBase::vector_mul_vector_op<Complex, Device, FPTYPE>()(npw, tmpvpsi, tmpsi_in, gtmp_ptr[id], add);
@@ -174,64 +178,60 @@ void Velocity<FPTYPE, Device>::act(const psi::Psi<std::complex<FPTYPE>, Device>*
             }
         }
         const std::int64_t spin_offset = static_cast<std::int64_t>(current_spin) * this->vtau_col_;
-        const Real* vtau_spin = this->vtau_col_ > 0 ? this->vtau_ + spin_offset : nullptr;
+        const Real *vtau_spin = this->vtau_col_ > 0 ? this->vtau_ + spin_offset : nullptr;
         Complex minus_half_i(0.0, -0.5);
         for (int ib = 0; ib < n_npwx; ++ib)
         {
             const std::int64_t band_offset = static_cast<std::int64_t>(ib) * max_npw;
-            const Complex* bandpsi = psi0 + band_offset;
+            const Complex *bandpsi = psi0 + band_offset;
             this->wfcpw->recip_to_real(this->ctx, bandpsi, this->porter1_, this->ik);
             if (this->vtau_col_ > 0)
             {
-                ModuleBase::vector_mul_vector_op<Complex, Device, FPTYPE>()(this->vtau_col_,
-                                                                            this->porter1_,
-                                                                            this->porter1_,
-                                                                            vtau_spin,
-                                                                            false);
+                ModuleBase::vector_mul_vector_op<Complex, Device, FPTYPE>()(
+                    this->vtau_col_, this->porter1_, this->porter1_, vtau_spin, false);
             }
             this->wfcpw->real_to_recip(this->ctx, this->porter1_, this->porter1_, this->ik);
             for (int id = 0; id < 3; ++id)
             {
-                Complex* vpsi_slice = vpsi + id * component_elements + band_offset;
+                Complex *vpsi_slice = vpsi + id * component_elements + band_offset;
                 Complex one = 1.0;
                 // term1: partial_id (v_tau * psi)
                 if (npw > 0)
                 {
-                    meta_pw_op<Real, Device>()(this->ctx,
-                                               this->ik,
-                                               id,
-                                               npw,
-                                               max_npw,
-                                               this->tpiba,
-                                               this->wfcpw->template get_gcar_data<Real>(),
-                                               this->wfcpw->template get_kvec_c_data<Real>(),
-                                               this->porter1_,
-                                               this->porter2_,
-                                               false);
+                    meta_pw_op<Real, Device>()(
+                        this->ctx,
+                        this->ik,
+                        id,
+                        npw,
+                        max_npw,
+                        this->tpiba,
+                        this->wfcpw->template get_gcar_data<Real>(),
+                        this->wfcpw->template get_kvec_c_data<Real>(),
+                        this->porter1_,
+                        this->porter2_,
+                        false);
                     ModuleBase::scal_op<Real, Device>()(npw, &minus_half_i, this->porter2_, 1);
                     ModuleBase::axpy_op<Complex, Device>()(npw, &one, this->porter2_, 1, vpsi_slice, 1);
 
                     // term2: v_tau * partial_id psi
-                    meta_pw_op<Real, Device>()(this->ctx,
-                                               this->ik,
-                                               id,
-                                               npw,
-                                               max_npw,
-                                               this->tpiba,
-                                               this->wfcpw->template get_gcar_data<Real>(),
-                                               this->wfcpw->template get_kvec_c_data<Real>(),
-                                               bandpsi,
-                                               this->porter2_,
-                                               false);
+                    meta_pw_op<Real, Device>()(
+                        this->ctx,
+                        this->ik,
+                        id,
+                        npw,
+                        max_npw,
+                        this->tpiba,
+                        this->wfcpw->template get_gcar_data<Real>(),
+                        this->wfcpw->template get_kvec_c_data<Real>(),
+                        bandpsi,
+                        this->porter2_,
+                        false);
                 }
                 this->wfcpw->recip_to_real(this->ctx, this->porter2_, this->porter2_, this->ik);
                 if (this->vtau_col_ > 0)
                 {
-                    ModuleBase::vector_mul_vector_op<Complex, Device, FPTYPE>()(this->vtau_col_,
-                                                                                this->porter2_,
-                                                                                this->porter2_,
-                                                                                vtau_spin,
-                                                                                false);
+                    ModuleBase::vector_mul_vector_op<Complex, Device, FPTYPE>()(
+                        this->vtau_col_, this->porter2_, this->porter2_, vtau_spin, false);
                 }
                 this->wfcpw->real_to_recip(this->ctx, this->porter2_, this->porter2_, this->ik);
                 if (npw > 0)
@@ -255,39 +255,18 @@ void Velocity<FPTYPE, Device>::act(const psi::Psi<std::complex<FPTYPE>, Device>*
 
     // 1. <\beta|\psi>
     const std::int64_t block = static_cast<std::int64_t>(this->ppcell->nkb) * n_npwx;
-    Complex* becp1_ = this->contraction_.prepare(block);
-    Complex* becp2_ = becp1_ + block;
-    Complex* ps1_ = becp1_ + 4 * block;
-    Complex* ps2_ = ps1_ + block;
+    Complex *becp1_ = this->contraction_.project(vkb_, gradvkb_, psi0, npw, max_npw, this->ppcell->nkb, n_npwx, 4);
+    Complex *ps1_ = becp1_ + 4 * block;
+    Complex *ps2_ = ps1_ + block;
 
     const int nkb = this->ppcell->nkb;
-    const int nkb3 = 3 * nkb;
     Complex one = 1.0;
-    Complex zero = 0.0;
 
-    const Complex* vkb_d = vkb_;
-    const Complex* gradvkb_d = gradvkb_;
-
-    if (npw == 0)
-    {
-        // Keep the reduction collective even when this rank has no local plane waves.
-        const std::int64_t projection_elements = 4 * block;
-        base_device::memory::set_memory_op<Complex, Device>()(becp1_, 0, projection_elements);
-    }
-    else if (n_npwx == 1)
-    {
-        int inc = 1;
-        ModuleBase::gemv_op<Complex, Device>()('C', npw, nkb, &one, vkb_d, max_npw, psi0, inc, &zero, becp1_, inc);
-        ModuleBase::gemv_op<Complex, Device>()('C', npw, nkb3, &one, gradvkb_d, max_npw, psi0, inc, &zero, becp2_, inc);
-    }
-    else
-    {
-        ModuleBase::gemm_op<Complex, Device>()('C', 'N', nkb, n_npwx, npw, &one, vkb_d, max_npw, psi0, max_npw, &zero, becp1_, nkb);
-        ModuleBase::gemm_op<Complex, Device>()('C', 'N', nkb3, n_npwx, npw, &one, gradvkb_d, max_npw, psi0, max_npw, &zero, becp2_, nkb3);
-    }
+    const Complex *vkb_d = vkb_;
+    const Complex *gradvkb_d = gradvkb_;
 
     // deeq stores energies in Ry; velocity uses Hartree atomic units like p.
-    this->contraction_.contract(*this->ucell, *this->ppcell, this->isk[this->ik], n_npwx, npol, FPTYPE(0.5), *this->wfcpw, becp1_);
+    this->contraction_.contract(*this->ucell, *this->ppcell, this->isk[this->ik], n_npwx, npol, 4, FPTYPE(0.5), *this->wfcpw, becp1_);
 
     if (npw == 0)
     {
@@ -303,8 +282,8 @@ void Velocity<FPTYPE, Device>::act(const psi::Psi<std::complex<FPTYPE>, Device>*
             const std::int64_t vkbshift = static_cast<std::int64_t>(id) * max_npw * nkb;
             const std::int64_t ps2shift = static_cast<std::int64_t>(id) * nkb;
             const std::int64_t npwshift = id * component_elements;
-            ModuleBase::gemv_op<Complex,
-                                Device>()('N', npw, nkb, &one, gradvkb_d + vkbshift, max_npw, ps1_, inc, &one, vpsi + npwshift, inc);
+            ModuleBase::gemv_op<Complex, Device>()(
+                'N', npw, nkb, &one, gradvkb_d + vkbshift, max_npw, ps1_, inc, &one, vpsi + npwshift, inc);
             ModuleBase::gemv_op<Complex, Device>()('N', npw, nkb, &one, vkb_d, max_npw, ps2_ + ps2shift, inc, &one, vpsi + npwshift, inc);
         }
     }
@@ -315,32 +294,10 @@ void Velocity<FPTYPE, Device>::act(const psi::Psi<std::complex<FPTYPE>, Device>*
             const std::int64_t vkbshift = static_cast<std::int64_t>(id) * max_npw * nkb;
             const std::int64_t ps2shift = id * block;
             const std::int64_t npwshift = id * component_elements;
-            ModuleBase::gemm_op<Complex, Device>()('N',
-                                                   'T',
-                                                   npw,
-                                                   n_npwx,
-                                                   nkb,
-                                                   &one,
-                                                   gradvkb_d + vkbshift,
-                                                   max_npw,
-                                                   ps1_,
-                                                   n_npwx,
-                                                   &one,
-                                                   vpsi + npwshift,
-                                                   max_npw);
-            ModuleBase::gemm_op<Complex, Device>()('N',
-                                                   'T',
-                                                   npw,
-                                                   n_npwx,
-                                                   nkb,
-                                                   &one,
-                                                   vkb_d,
-                                                   max_npw,
-                                                   ps2_ + ps2shift,
-                                                   n_npwx,
-                                                   &one,
-                                                   vpsi + npwshift,
-                                                   max_npw);
+            ModuleBase::gemm_op<Complex, Device>()(
+                'N', 'T', npw, n_npwx, nkb, &one, gradvkb_d + vkbshift, max_npw, ps1_, n_npwx, &one, vpsi + npwshift, max_npw);
+            ModuleBase::gemm_op<Complex, Device>()(
+                'N', 'T', npw, n_npwx, nkb, &one, vkb_d, max_npw, ps2_ + ps2shift, n_npwx, &one, vpsi + npwshift, max_npw);
         }
     }
 

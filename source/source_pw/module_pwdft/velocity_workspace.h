@@ -4,8 +4,6 @@
 #include "source_base/module_container/ATen/core/tensor.h"
 #include "source_pw/module_pwdft/vnl_pw.h"
 
-#include <cstdint>
-
 namespace hamilt
 {
 /** @brief Reusable projection storage and device contraction for a velocity operator. */
@@ -16,21 +14,31 @@ class VelocityWorkspace
     using Complex = std::complex<Real>;
     ct::Tensor coefficients_;
     std::vector<Complex> host_;
-    std::int64_t capacity_ = 0;
 
   public:
-    /** @brief Reserve four input and four output projector blocks. */
-    Complex* prepare(const std::int64_t count);
+    /** @brief Share beta and momentum-gradient overlaps between electronic velocity and RT-TDDFT nuclear energy derivatives. */
+    Complex *project(
+        const Complex *beta,
+        const Complex *grad,
+        const Complex *psi,
+        int npw,
+        int ld,
+        int nkb,
+        int cols,
+        int ncomp);
 
-    /** @brief Reduce four projection blocks and contract D on their native device; bands counts spin-component columns. */
-    void contract(const UnitCell& cell,
-                  const pseudopot_cell_vnl& pp,
-                  const int spin,
-                  const int bands,
-                  const int npol,
-                  const Real scale,
-                  const ModulePW::PW_Basis_K& basis,
-                  Complex* buffer);
+    /** @brief Reduce four overlap blocks and contract the first ncomp blocks with D; bands counts spin-component columns. */
+    // ncomp=4 serves the general velocity operator; ncomp=1 supplies D<beta|psi> for the RT-TDDFT nuclear derivative.
+    void contract(
+        const UnitCell &cell,
+        const pseudopot_cell_vnl &pp,
+        const int spin,
+        const int bands,
+        const int npol,
+        const int ncomp,
+        const Real scale,
+        const ModulePW::PW_Basis_K &basis,
+        Complex *buffer);
 };
 } // namespace hamilt
 #endif

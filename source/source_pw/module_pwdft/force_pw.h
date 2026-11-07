@@ -15,6 +15,7 @@
 #include "source_pw/module_pwdft/vl_pw.h"
 
 #include <string>
+#include <vector>
 
 class pseudopot_cell_vnl;
 
@@ -57,11 +58,13 @@ class Forces
      * @brief Return PW forces in Ry/Bohr and print them in eV/Angstrom.
      * @param esolver_type Selects the RT-TDDFT instantaneous-force treatment for "tddft".
      * @param nonlocal_a RT-TDDFT nonlocal momentum shift in Hartree atomic units; zero for ground-state calls.
+     * @param ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units; non-RT callers pass an empty vector.
      * @param electric RT-TDDFT electric field in Hartree atomic units; zero for ground-state calls.
      */
     void cal_force(
         const std::string &esolver_type,
         const ModuleBase::Vector3<double> &nonlocal_a,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
         const ModuleBase::Vector3<double> &electric,
         const int nspin,
         const bool domag,
@@ -122,6 +125,7 @@ class Forces
     void cal_force_nl(
         ModuleBase::matrix &forcenl,
         const ModuleBase::Vector3<double> &nonlocal_a,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
         const ModuleBase::matrix &wg,
         const ModuleBase::matrix &ekb,
         const K_Vectors *p_kv,

@@ -46,6 +46,7 @@ class TDVelPW
         const elecstate::ElecState &state,
         const ModuleBase::Vector3<double> &a,
         const ModuleBase::Vector3<double> &nonlocal_a,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
         const CurrentRequest &request);
 };
 } // namespace pw

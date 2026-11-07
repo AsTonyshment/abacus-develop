@@ -53,12 +53,13 @@ class pseudopot_cell_vnl
     double table_dq() const { return table_dq_; }
 
     /**
-     * @brief Build nonlocal projectors at G+k+A; pass zero A for ground-state calculations.
+     * @brief Build nonlocal projectors at G+k+A-v_I; ground-state calls pass zero A and empty velocities.
      *
      * @param ctx Device context.
      * @param ucell Unit cell defining reciprocal-space units.
      * @param ik K-point index.
      * @param vector_potential RT-TDDFT nonlocal momentum shift in Hartree atomic units; zero for ground-state calls.
+     * @param ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units; non-RT callers pass an empty vector.
      * @param vkb_in Output projector buffer.
      * @param lead_dim Stride between projectors in complex elements, at least the local npw.
      */
@@ -68,6 +69,7 @@ class pseudopot_cell_vnl
         const UnitCell &ucell,
         const int &ik,
         const ModuleBase::Vector3<double> &vector_potential,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
         std::complex<FPTYPE> *vkb_in,
         int lead_dim) const;
 
@@ -248,6 +250,9 @@ class pseudopot_cell_vnl
     mutable std::array<ct::Tensor, 2> vnl_radial_;
     mutable std::array<ct::Tensor, 2> vnl_momentum_;
     mutable std::array<ct::Tensor, 2> vnl_structure_;
+    mutable std::array<ct::Tensor, 2> vnl_vel_;
+    mutable ct::Tensor vnl_meta_;
+    mutable std::vector<int> vnl_host_meta_;
     mutable ct::Tensor vnl_atom_counts_;
     mutable std::vector<int> vnl_host_atom_counts_;
     mutable std::vector<ModuleBase::Vector3<double>> vnl_host_momentum_;

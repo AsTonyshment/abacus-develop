@@ -346,25 +346,41 @@ void ESolver_KS_PW_TDDFT<T, Device>::before_scf(UnitCell &ucell, const int istep
 template <typename T, typename Device>
 void ESolver_KS_PW_TDDFT<T, Device>::prepare_init_hamilt(const UnitCell &ucell)
 {
-    if (this->field_->gauge() == 1)
+    // 1) Cache the unshifted momentum bound of the fixed PW basis during initialization.
+    if (this->field_->current_step() == 0)
     {
-        // 1) Cache the unshifted momentum bound of the fixed PW basis during initialization.
-        if (this->field_->current_step() == 0)
-        {
-            qmax_ = pw::td_momentum_bound(*this->pw_wfc, ucell.tpiba);
-        }
-        // 2) Extend radial projector tables to cover the endpoint vector potentials and their interpolated samples.
-        const ModuleBase::Vector3<double> &left = this->field_->A_left_ha();
-        const ModuleBase::Vector3<double> &right = this->field_->A_right_ha();
-        pw::ensure_td_vnl(ucell, qmax_, right, left, &this->ppcell);
-
-        // 3) Bind the right-endpoint potential and vector potential before applying the Hamiltonian.
-        // This also includes a file-supplied nonzero A(0) when preparing the initial wavefunctions.
-        elecstate::Potential &potential = *this->pelec->pot;
-        const Real *veff = potential.template get_veff_smooth_data<Real>();
-        hamilt::HamiltPW<T, Device> *hamilt_pw = static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
-        hamilt_pw->bind_td_state(veff, this->field_->A_right_ha());
+        qmax_ = pw::td_momentum_bound(*this->pw_wfc, ucell.tpiba);
     }
+
+    // 2) Cover the actual endpoint and propagation samples, including nuclear velocities in either gauge.
+    const ModuleBase::Vector3<double> &left = this->field_->A_left_ha();
+    const ModuleBase::Vector3<double> &right = this->field_->A_right_ha();
+    const double amax = this->inp_->td_vg_nl == 0 ? 0.0 : std::max({left.norm(), right.norm(), this->field_->A_prop_ha().norm()});
+    double vmax = 0.0;
+    const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(ucell, this->inp_->td_nl_motion);
+    for (const ModuleBase::Vector3<double> &v : vel)
+    {
+        vmax = std::max(vmax, v.norm());
+    }
+    if (this->inp_->td_nl_motion && this->history_.ready())
+    {
+        for (const unitcell::IonicAtom &atom : prop_ions_.atoms)
+        {
+            vmax = std::max(vmax, atom.velocity.norm());
+        }
+        for (const unitcell::IonicAtom &atom : this->history_.ions().atoms)
+        {
+            vmax = std::max(vmax, atom.velocity.norm());
+        }
+    }
+    // The triangle bound covers every sampled G+k+A-v_I without constructing a momentum grid for each atom.
+    const double bound = qmax_ + amax + vmax;
+    this->ppcell.ensure_vnl_range(ucell, bound);
+
+    // 3) Bind the complete endpoint operator, including file-supplied A(0), before initializing orbitals.
+    const Real *veff = this->pelec->pot->template get_veff_smooth_data<Real>();
+    hamilt::HamiltPW<T, Device> *hamilt_pw = static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
+    hamilt_pw->bind_td_state(veff, right, vel);
 }
 
 template <typename T, typename Device>
@@ -523,11 +539,12 @@ void ESolver_KS_PW_TDDFT<T, Device>::after_scf(UnitCell &ucell, const int istep,
         this->rebuild_end(&ucell);
     }
 
-    // 2) Bind the finalized endpoint Hamiltonian for optional Eij output and common PW post-SCF processing.
+    // 2) Bind endpoint potential, field and nuclear velocities for optional Eij output and common PW post-SCF processing.
     hamilt::HamiltPW<T, Device> *hamilt = static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
     const Real *veff = this->pelec->pot->template get_veff_smooth_data<Real>();
     const ModuleBase::Vector3<double> &vecpot = this->field_->A_right_ha();
-    hamilt->bind_td_state(veff, vecpot);
+    const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(ucell, this->inp_->td_nl_motion);
+    hamilt->bind_td_state(veff, vecpot, vel);
     this->out_eij(istep);
 
     ESolver_KS_PW<T, Device>::after_scf(ucell, istep, conv_esolver);
@@ -556,6 +573,7 @@ void ESolver_KS_PW_TDDFT<T, Device>::rebuild_end(UnitCell *cell)
     elecstate::ElecStatePW<T, Device> &estate = *static_cast<elecstate::ElecStatePW<T, Device> *>(this->pelec);
     hamilt::HamiltPW<T, Device> &hamilt = *static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
     const ModuleBase::Vector3<double> &vecpot = this->field_->A_right_ha();
+    const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(*cell, this->inp_->td_nl_motion);
     pw::rebuild_td_end(
         current,
         estate,
@@ -566,6 +584,7 @@ void ESolver_KS_PW_TDDFT<T, Device>::rebuild_end(UnitCell *cell)
         *this->pw_wfc,
         *this->pw_rhod,
         vecpot,
+        vel,
         this->inp_->nspin,
         this->inp_->imp_sol,
         this->inp_->sc_mag_switch,

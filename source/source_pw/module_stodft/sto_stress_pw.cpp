@@ -191,7 +191,8 @@ void Sto_Stress_PW<FPTYPE, Device>::sto_stress_nl(ModuleBase::matrix& sigma,
         const int npw = wfc_basis->npwk[ik];
         psi_in.fix_k(ik);
         stowf.shchi->fix_k(ik);
-        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a);
+        // Empty velocities retain the SDFT stress model; the nuclear velocity phase is used only in RT-TDDFT.
+        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a, {});
         // calculate becp = <psi|beta> for all beta functions
         nl_tools.cal_becp(ik, nksbands, psi_in.get_pointer(), 0);
         nl_tools.cal_becp(ik, nstobands, stowf.shchi->get_pointer(), nksbands);

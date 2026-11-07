@@ -13,7 +13,11 @@ class TDHamiltPW final : public hsolver::HSOperator<T, Device>
 {
   public:
     using Real = typename T::value_type;
-    TDHamiltPW(hamilt::HamiltPW<T, Device> *hamilt, const ModulePW::PW_Basis_K &basis, TDIonPW *ions);
+    TDHamiltPW(
+        hamilt::HamiltPW<T, Device> *hamilt,
+        const ModulePW::PW_Basis_K &basis,
+        TDIonPW *ions,
+        bool motion);
     /** @brief Apply an ionic sample and borrow the potential for subsequent k-point applications. */
     void bind(const Real *veff, const ModuleBase::Vector3<double> &vecpot_ha, const unitcell::IonicState &state);
     void update_k(int ik) override;
@@ -32,6 +36,7 @@ class TDHamiltPW final : public hsolver::HSOperator<T, Device>
     hamilt::HamiltPW<T, Device> &hamilt_;
     hamilt::HamiltHSOperator<T, Device> op_;
     TDIonPW &ions_;
+    const bool motion_;
 };
 } // namespace pw
 #endif

@@ -43,8 +43,13 @@ class FS_Nonlocal_tools
     /**
      * @brief Build projectors with a Hartree-unit momentum shift and a compact npw stride.
      * @param a RT-TDDFT nonlocal momentum shift; zero for ground-state force and stress calculations.
+     * @param ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units; non-RT callers pass an empty vector.
      */
-    void cal_vkb(const int &ik, const int &nbdall, const ModuleBase::Vector3<double> &a);
+    void cal_vkb(
+        const int &ik,
+        const int &nbdall,
+        const ModuleBase::Vector3<double> &a,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel);
 
     /**
      * @brief calculate the becp = <psi|beta> for all beta functions

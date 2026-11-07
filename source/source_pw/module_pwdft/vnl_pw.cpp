@@ -33,7 +33,8 @@ pseudopot_cell_vnl::~pseudopot_cell_vnl() {}
 
 void pseudopot_cell_vnl::release_memory()
 {
-    for (auto *buffers : {&vnl_ylm_, &vnl_radial_, &vnl_momentum_, &vnl_structure_})
+    // Release RT-TDDFT velocity and projector-index caches together with the shared PW scratch buffers.
+    for (std::array<ct::Tensor, 2> *buffers : {&vnl_ylm_, &vnl_radial_, &vnl_momentum_, &vnl_structure_, &vnl_vel_})
     {
         for (ct::Tensor &buffer : *buffers)
         {
@@ -41,6 +42,8 @@ void pseudopot_cell_vnl::release_memory()
         }
     }
     vnl_atom_counts_ = ct::Tensor(ct::DataType::DT_INT, {0});
+    vnl_meta_ = ct::Tensor(ct::DataType::DT_INT, {0});
+    std::vector<int>().swap(vnl_host_meta_);
     std::vector<int>().swap(vnl_host_atom_counts_);
     std::vector<ModuleBase::Vector3<double>>().swap(vnl_host_momentum_);
     if (this->nhm <= 0 || memory_released)

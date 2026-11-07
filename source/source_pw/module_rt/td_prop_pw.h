@@ -37,7 +37,10 @@ class TDPropPW
   public:
     /** @brief Take ownership of the initialized orbital service and propagator. */
     TDPropPW(
-        const ModulePW::PW_Basis_K &basis, std::unique_ptr<hsolver::TDOrbOps<T, Device>> orb_ops, std::unique_ptr<PWProp<T, Device>> prop);
+        const ModulePW::PW_Basis_K &basis,
+        std::unique_ptr<hsolver::TDOrbOps<T, Device>> orb_ops,
+        std::unique_ptr<PWProp<T, Device>> prop,
+        bool motion);
     void begin_trial();
     double sample_time(double left, double right) const;
     hsolver::TDOrbOps<T, Device> &orbitals() { return *orb_ops_; }
@@ -58,6 +61,7 @@ class TDPropPW
 
   private:
     const ModulePW::PW_Basis_K &basis_;
+    const bool motion_;
     std::unique_ptr<hsolver::TDOrbOps<T, Device>> orb_ops_;
     std::unique_ptr<PWProp<T, Device>> prop_;
 };

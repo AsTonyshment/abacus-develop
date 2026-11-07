@@ -523,6 +523,25 @@ For a nonorthogonal LCAO basis:
         this->add_item(item);
     }
     {
+        Input_Item item("td_nl_motion");
+        item.annotation = "atomic velocity dependence of PW nonlocal pseudopotentials";
+        item.category = "Real-Time TDDFT (PW)";
+        item.type = "Boolean";
+        item.description = R"(Controls the nuclear velocity dependence of norm-conserving nonlocal pseudopotentials in PW RT-TDDFT.
+
+* `True`: Include the nuclear velocity phase in electronic propagation and ionic position forces, and calculate the derivative of the electronic energy with respect to nuclear velocity. This derivative can be nonzero even at zero instantaneous nuclear velocity.
+* `False`: Use position-dependent pseudopotentials without nuclear velocity dependence.
+
+This setting applies in both length and velocity gauges, as well as without an external field. In velocity gauge, `td_vg_nl` controls the electromagnetic coupling separately.
+
+See M. Stengel, M. Royo, and E. Artacho, Phys. Rev. Lett. 136, 196401 (2026), for more information.)";
+        item.default_value = "True";
+        item.unit = "";
+        item.set_availability("basis_type==pw and esolver_type==tddft");
+        read_sync_bool(input.td_nl_motion);
+        this->add_item(item);
+    }
+    {
         Input_Item item("td_vg_nl");
         item.annotation = "nonlocal electromagnetic coupling in PW velocity gauge";
         item.category = "Real-Time TDDFT (PW)";

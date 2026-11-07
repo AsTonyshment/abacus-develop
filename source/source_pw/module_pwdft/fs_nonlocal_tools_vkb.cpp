@@ -10,7 +10,11 @@ namespace hamilt
 {
 
 template <typename FPTYPE, typename Device>
-void FS_Nonlocal_tools<FPTYPE, Device>::cal_vkb(const int &ik, const int &nbdall, const ModuleBase::Vector3<double> &a)
+void FS_Nonlocal_tools<FPTYPE, Device>::cal_vkb(
+    const int &ik,
+    const int &nbdall,
+    const ModuleBase::Vector3<double> &a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel)
 {
     ModuleBase::timer::start("FS_Nonlocal_tools", "cal_vkb");
     const int columns = nbdall * this->ucell_->get_npol();
@@ -23,8 +27,8 @@ void FS_Nonlocal_tools<FPTYPE, Device>::cal_vkb(const int &ik, const int &nbdall
     const int npw = this->wfc_basis_->npwk[ik];
     if (npw > 0)
     {
-        // The shared projector builder applies the RT-TDDFT shift a; ground-state callers supply zero.
-        this->nlpp_->getvnl(this->ctx, *this->ucell_, ik, a, this->ppcell_vkb, npw);
+        // RT-TDDFT supplies field and nuclear velocity shifts; other force and stress callers use zero a and empty velocities.
+        this->nlpp_->getvnl(this->ctx, *this->ucell_, ik, a, ion_vel, this->ppcell_vkb, npw);
     }
     ModuleBase::timer::end("FS_Nonlocal_tools", "cal_vkb");
 }
@@ -87,7 +91,11 @@ void FS_Nonlocal_tools<FPTYPE, Device>::reduce_pool_becp(const int &npm)
 }
 
 // template instantiation
-template void FS_Nonlocal_tools<double, base_device::DEVICE_CPU>::cal_vkb(const int &, const int &, const ModuleBase::Vector3<double> &);
+template void FS_Nonlocal_tools<double, base_device::DEVICE_CPU>::cal_vkb(
+    const int &,
+    const int &,
+    const ModuleBase::Vector3<double> &,
+    const std::vector<ModuleBase::Vector3<double>> &);
 template void FS_Nonlocal_tools<double, base_device::DEVICE_CPU>::cal_becp(
     const int &,
     const int &,
@@ -95,7 +103,11 @@ template void FS_Nonlocal_tools<double, base_device::DEVICE_CPU>::cal_becp(
     const int &);
 template void FS_Nonlocal_tools<double, base_device::DEVICE_CPU>::reduce_pool_becp(const int &);
 #if ((defined __CUDA) || (defined __ROCM))
-template void FS_Nonlocal_tools<double, base_device::DEVICE_GPU>::cal_vkb(const int &, const int &, const ModuleBase::Vector3<double> &);
+template void FS_Nonlocal_tools<double, base_device::DEVICE_GPU>::cal_vkb(
+    const int &,
+    const int &,
+    const ModuleBase::Vector3<double> &,
+    const std::vector<ModuleBase::Vector3<double>> &);
 template void FS_Nonlocal_tools<double, base_device::DEVICE_GPU>::cal_becp(
     const int &,
     const int &,

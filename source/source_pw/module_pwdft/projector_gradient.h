@@ -1,7 +1,7 @@
 #ifndef PW_PROJECTOR_GRADIENT_H
 #define PW_PROJECTOR_GRADIENT_H
-#include "source_pw/module_pwdft/vnl_pw.h"
 #include "source_base/module_container/ATen/core/tensor.h"
+#include "source_pw/module_pwdft/vnl_pw.h"
 
 namespace hamilt
 {
@@ -16,17 +16,26 @@ class ProjectorGradient
     ct::Tensor metadata_;
     ct::Tensor momentum_;
     ct::Tensor structure_;
+    ct::Tensor vel_;
     size_t version_ = 0;
     std::vector<Real> host_q_;
     std::vector<int> host_metadata_;
 
     template <typename Value>
-    void reserve(ct::Tensor* tensor, const int64_t count);
+    void reserve(ct::Tensor *tensor, const int64_t count);
 
   public:
-    /** @brief Refresh the shifted gradient in native precision and device storage. */
-    void calculate(pseudopot_cell_vnl* pp, const UnitCell& cell, const ModulePW::PW_Basis_K& basis,
-                   const int ik, const ModuleBase::Vector3<double>& A, Complex* output);
+    /** @brief Evaluate momentum derivatives at G+k+A-v_I for the current operator.
+     * @param ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units; non-RT callers pass an empty vector.
+     */
+    void calculate(
+        pseudopot_cell_vnl *pp,
+        const UnitCell &cell,
+        const ModulePW::PW_Basis_K &basis,
+        const int ik,
+        const ModuleBase::Vector3<double> &A,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+        Complex *output);
 };
 } // namespace hamilt
 #endif

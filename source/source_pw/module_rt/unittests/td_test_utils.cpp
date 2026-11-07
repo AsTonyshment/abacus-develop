@@ -122,7 +122,7 @@ void Observables::TearDown() { pp_.release_memory(); }
 Vector Observables::projectors(const ModuleBase::Vector3<double> &a)
 {
     Vector beta(pp_.nkb * basis_.npwk_max);
-    pp_.getvnl<double, Device>(nullptr, cell_, 0, a, beta.data(), basis_.npwk_max);
+    pp_.getvnl<double, Device>(nullptr, cell_, 0, a, {}, beta.data(), basis_.npwk_max);
     return beta;
 }
 

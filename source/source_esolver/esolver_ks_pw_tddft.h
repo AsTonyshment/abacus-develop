@@ -4,6 +4,7 @@
 #include "source_esolver/esolver_ks_pw.h"
 #include "source_estate/module_pot/td_field_manager.h"
 #include "source_pw/module_rt/td_history_pw.h"
+#include "source_pw/module_rt/td_ion_pi_pw.h"
 #include "source_pw/module_rt/td_ion_pw.h"
 #include "source_pw/module_rt/td_prop_pw.h"
 #include "source_pw/module_rt/td_spin_pw.h"
@@ -33,6 +34,8 @@ class ESolver_KS_PW_TDDFT : public ESolver_KS_PW<T, Device>
         int last_step,
         const pw::TDIonPath &ions);
     double cal_energy() override;
+    /** @brief Accepted endpoint dE/dv, indexed by atom and Cartesian direction, in Hartree atomic units. */
+    const ModuleBase::matrix &ion_pi() const { return ion_pi_; }
 
   protected:
     /** @brief Use independent iteration limits for initial-state SCF and propagation. */
@@ -70,6 +73,8 @@ class ESolver_KS_PW_TDDFT : public ESolver_KS_PW<T, Device>
     std::shared_ptr<elecstate::TDFieldManager> field_;
     pw::TDVelPW<Real, Device> vel_;
     pw::TDSpinPW<Real, Device> spin_;
+    pw::TDIonPiPW<Real, Device> pi_calc_;
+    ModuleBase::matrix ion_pi_;
     pw::CurrentRequest current_req_;
 
     pw::TDHistoryPW<T, Device> history_;

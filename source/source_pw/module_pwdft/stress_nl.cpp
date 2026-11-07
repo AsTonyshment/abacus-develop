@@ -60,7 +60,8 @@ void Stress_Func<FPTYPE, Device>::stress_nl(ModuleBase::matrix& sigma,
         }
         const int npm = nbands_occ;
 
-        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a);
+        // Empty velocities retain this position-dependent stress model; the nuclear velocity phase is used only in RT-TDDFT.
+        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a, {});
         // calculate becp = <psi|beta> for all beta functions
         nl_tools.cal_becp(ik, npm, &psi_in[0](ik,0,0));
         nl_tools.reduce_pool_becp(max_nbands);

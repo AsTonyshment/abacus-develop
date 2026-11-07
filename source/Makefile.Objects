@@ -62,6 +62,7 @@ VPATH=./src_global:\
 ./source_pw/module_proj:\
 ./source_pw/module_pwdft:\
 ./source_pw/module_rt:\
+./source_pw/module_rt/kernels:\
 ./source_pw/module_ofdft:\
 ./source_pw/module_stodft:\
 ./source_pw/module_pwdft/kernels:\
@@ -402,6 +403,8 @@ OBJS_HAMILT=hamilt_pw.o\
     td_prop_pw.o\
     td_hamilt_pw.o\
     td_ion_pw.o\
+    td_ion_pi_pw.o\
+    ion_pi_op.o\
     prop_cn_pw.o\
     prop_etrs_pw.o\
     td_history_pw.o\

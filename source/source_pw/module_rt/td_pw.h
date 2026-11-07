@@ -4,7 +4,6 @@
 #include "source_basis/module_pw/pw_basis_k.h"
 #include "source_cell/unitcell.h"
 #include "source_io/module_parameter/input_parameter.h"
-#include "source_pw/module_pwdft/vnl_pw.h"
 
 namespace pw
 {
@@ -18,13 +17,8 @@ void check_td_ions(const Input_para &input);
 /** @brief Return the global unshifted momentum bound after updating the distributed basis. */
 double td_momentum_bound(const ModulePW::PW_Basis_K &basis, const double tpiba);
 
-/** @brief Extend the projector table to cover both endpoint and propagation fields in Hartree atomic units. */
-void ensure_td_vnl(
-    const UnitCell &cell,
-    const double unshifted_bound,
-    const ModuleBase::Vector3<double> &A_right_ha,
-    const ModuleBase::Vector3<double> &A_prop_ha,
-    pseudopot_cell_vnl *projectors);
+/** @brief Extract RT-TDDFT nuclear velocities in type-major order and Hartree units; empty selects position-dependent pseudopotentials. */
+std::vector<ModuleBase::Vector3<double>> td_ion_vel(const UnitCell &cell, bool motion);
 
 } // namespace pw
 #endif

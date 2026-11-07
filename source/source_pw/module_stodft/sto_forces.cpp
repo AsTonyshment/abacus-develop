@@ -237,7 +237,8 @@ void Sto_Forces<FPTYPE, Device>::cal_sto_force_nl(
         psi_in.fix_k(ik);
         stowf.shchi->fix_k(ik);
 
-        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a);
+        // Empty velocities retain the SDFT force model during ionic motion; the nuclear velocity phase serves RT-TDDFT.
+        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a, {});
 
         // calculate becp = <psi|beta> for all beta functions
         nl_tools.cal_becp(ik, nksbands, psi_in.get_pointer(), 0);

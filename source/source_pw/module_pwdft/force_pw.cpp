@@ -29,6 +29,7 @@ template <typename FPTYPE, typename Device>
 void Forces<FPTYPE, Device>::cal_force(
     const std::string &esolver_type,
     const ModuleBase::Vector3<double> &nonlocal_a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel,
     const ModuleBase::Vector3<double> &electric,
     const int nspin,
     const bool domag,
@@ -77,7 +78,7 @@ void Forces<FPTYPE, Device>::cal_force(
     {
 
         this->npwx = wfc_basis->npwk_max;
-        Forces::cal_force_nl(forcenl, nonlocal_a, wg, ekb, pkv, wfc_basis, p_sf, *p_nlpp, ucell, psi_in);
+        Forces::cal_force_nl(forcenl, nonlocal_a, ion_vel, wg, ekb, pkv, wfc_basis, p_sf, *p_nlpp, ucell, psi_in);
 
         if (PARAM.globalv.use_uspp)
         {

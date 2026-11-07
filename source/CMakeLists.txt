@@ -649,6 +649,7 @@ list(
   device_srcs
   source_pw/module_pwdft/kernels/projector_gradient_op.cpp
   source_pw/module_pwdft/kernels/nonlocal_op.cpp
+  source_pw/module_rt/kernels/ion_pi_op.cpp
   source_pw/module_pwdft/kernels/veff_op.cpp
   source_pw/module_pwdft/kernels/ekinetic_op.cpp
   source_pw/module_pwdft/kernels/meta_op.cpp
@@ -682,6 +683,7 @@ if(USE_CUDA)
     device_srcs
     source_pw/module_pwdft/kernels/cuda/projector_gradient_op.cu
     source_pw/module_pwdft/kernels/cuda/nonlocal_op.cu
+    source_pw/module_rt/kernels/cuda/ion_pi_op.cu
     source_pw/module_pwdft/kernels/cuda/veff_op.cu
     source_pw/module_pwdft/kernels/cuda/ekinetic_op.cu
     source_pw/module_pwdft/kernels/cuda/meta_op.cu
@@ -721,6 +723,7 @@ if(USE_ROCM)
     STATIC
     source_pw/module_pwdft/kernels/rocm/projector_gradient_op.hip.cu
     source_pw/module_pwdft/kernels/rocm/nonlocal_op.hip.cu
+    source_pw/module_rt/kernels/rocm/ion_pi_op.hip.cu
     source_pw/module_pwdft/kernels/rocm/veff_op.hip.cu
     source_pw/module_pwdft/kernels/rocm/ekinetic_op.hip.cu
     source_pw/module_pwdft/kernels/rocm/meta_op.hip.cu

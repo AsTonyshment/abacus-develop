@@ -540,9 +540,9 @@ void ESolver_OF::cal_force(BaseCell& basecell, ModuleBase::matrix& force)
  
     // here nullptr is for DFT+U, which may cause bugs, mohan note 2025-11-07
     // solvent can be used? mohan ask 2025-11-07
-    // The nonlocal vector potential and electric field arguments are only needed by RT-TDDFT.
+    // Zero fields and empty velocities retain the OFDFT force model; the added field and velocity arguments serve RT-TDDFT.
     const ModuleBase::Vector3<double> zero_field{0.0, 0.0, 0.0};
-    ff.cal_force(this->inp_->esolver_type, zero_field, zero_field, this->inp_->nspin, PARAM.globalv.domag, PARAM.globalv.domag_z, this->inp_->gga_grad,
+    ff.cal_force(this->inp_->esolver_type, zero_field, {}, zero_field, this->inp_->nspin, PARAM.globalv.domag, PARAM.globalv.domag_z, this->inp_->gga_grad,
                  this->inp_->dft_plus_u || this->inp_->sc_mag_switch,
                  ucell, force, this->get_vdw_result(), *pelec, this->pw_rho, &ucell.symm, &sf,
                  this->solvent, nullptr, &this->locpp);

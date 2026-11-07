@@ -4,16 +4,30 @@
 namespace pw
 {
 template <typename T, typename Device>
-TDHamiltPW<T, Device>::TDHamiltPW(hamilt::HamiltPW<T, Device> *hamilt, const ModulePW::PW_Basis_K &basis, TDIonPW *ions)
-    : hamilt_(*hamilt), op_(hamilt, &basis), ions_(*ions)
+TDHamiltPW<T, Device>::TDHamiltPW(
+    hamilt::HamiltPW<T, Device> *hamilt,
+    const ModulePW::PW_Basis_K &basis,
+    TDIonPW *ions,
+    bool motion)
+    : hamilt_(*hamilt), op_(hamilt, &basis), ions_(*ions), motion_(motion)
 {
 }
 template <typename T, typename Device>
 void TDHamiltPW<T, Device>::bind(const Real *veff, const ModuleBase::Vector3<double> &vecpot_ha, const unitcell::IonicState &state)
 {
-    // Bind geometry, local potential and vector potential together before the solver applies this operator.
+    // Bind geometry, atomic velocities, local potential and vector potential at the same operator time.
     ions_.bind(state);
-    hamilt_.bind_td_state(veff, vecpot_ha);
+    // Extract velocities from this propagation sample so the projector phase follows the sampled ionic path.
+    std::vector<ModuleBase::Vector3<double>> vel;
+    if (motion_)
+    {
+        vel.reserve(state.atoms.size());
+        for (const unitcell::IonicAtom &atom : state.atoms)
+        {
+            vel.push_back(atom.velocity);
+        }
+    }
+    hamilt_.bind_td_state(veff, vecpot_ha, vel);
 }
 template <typename T, typename Device>
 void TDHamiltPW<T, Device>::update_k(int ik)

@@ -24,47 +24,50 @@ class HamiltPW : public Hamilt<T, Device>
     // return T if T is real type(float, double),
     // otherwise return the real type of T(complex<float>, std::complex<double>)
     using Real = typename GetTypeReal<T>::type;
-    using syncmem_complex_h2d_op = base_device::memory::synchronize_memory_op<T,Device, base_device::DEVICE_CPU>;
+    using syncmem_complex_h2d_op = base_device::memory::synchronize_memory_op<T, Device, base_device::DEVICE_CPU>;
 
   public:
     // nonlocal_field controls nonlocal electromagnetic coupling only in RT-TDDFT velocity gauge.
-    HamiltPW(elecstate::Potential* pot_in,
-             ModulePW::PW_Basis_K* wfc_basis,
-             K_Vectors* p_kv,
-             pseudopot_cell_vnl* nlpp,
-             Plus_U_Base* p_dftu,
-             const UnitCell* ucell,
-             const General_Exx_Info* exx_info,
-             bool nonlocal_field);
+    HamiltPW(
+        elecstate::Potential *pot_in,
+        ModulePW::PW_Basis_K *wfc_basis,
+        K_Vectors *p_kv,
+        pseudopot_cell_vnl *nlpp,
+        Plus_U_Base *p_dftu,
+        const UnitCell *ucell,
+        const General_Exx_Info *exx_info,
+        bool nonlocal_field);
 
     ~HamiltPW();
 
     // for target K point, update consequence of hPsi() and matrix()
     void updateHk(const int ik) override;
 
-    /** @brief Bind local-potential buffers and Hartree vector potential for the same operation.
+    /** @brief Bind RT-TDDFT local-potential buffers, vector potential and nuclear velocities at the same operator time.
+     *  @param ion_vel Type-major velocities in Hartree atomic units; empty selects RT-TDDFT without the nuclear velocity phase.
      *  @note The caller must keep the buffers alive and restore endpoint state after propagation.
      */
-    void bind_td_state(const Real* veff, const ModuleBase::Vector3<double>& A_ha);
+    void bind_td_state(const Real *veff, const ModuleBase::Vector3<double> &A_ha, const std::vector<ModuleBase::Vector3<double>> &ion_vel);
 
-    void sPsi(const T* psi_in, // psi
-              T* spsi,         // spsi
-              const int nrow,  // dimension of spsi: nbands * nrow
-              const int npw,   // number of plane waves
-              const int nbands // number of bands
+    void sPsi(
+        const T *psi_in, // psi
+        T *spsi,         // spsi
+        const int nrow,  // dimension of spsi: nbands * nrow
+        const int npw,   // number of plane waves
+        const int nbands // number of bands
     ) const override;
 
-    void set_exx_helper(Exx_Helper<T, Device>& exx_helper_in);
+    void set_exx_helper(Exx_Helper<T, Device> &exx_helper_in);
 
   protected:
     // used in sPhi, which are calculated in hPsi or sPhi
-    const pseudopot_cell_vnl* ppcell = nullptr;
-    const UnitCell* const ucell = nullptr;
-    mutable T* vkb = nullptr;
-    Real* qq_nt = nullptr;
-    T* qq_so = nullptr;
+    const pseudopot_cell_vnl *ppcell = nullptr;
+    const UnitCell *const ucell = nullptr;
+    mutable T *vkb = nullptr;
+    Real *qq_nt = nullptr;
+    T *qq_so = nullptr;
 
-    Device* ctx = {};
+    Device *ctx = {};
     using gemv_op = ModuleBase::gemv_op<T, Device>;
     using gemm_op = ModuleBase::gemm_op<T, Device>;
     using setmem_complex_op = base_device::memory::set_memory_op<T, Device>;

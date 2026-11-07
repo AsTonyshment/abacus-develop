@@ -12,13 +12,16 @@ template <typename T, typename Device = base_device::DEVICE_CPU>
 class TDNonlocalPW : public OperatorPW<T, Device>
 {
   public:
-    /** @brief Bind the vector potential in Hartree atomic units before init(). */
-    void set_A_ha(const ModuleBase::Vector3<double> &A)
+    /** @brief Bind the RT-TDDFT vector potential and type-major nuclear velocities in Hartree units before init(). */
+    void bind(const ModuleBase::Vector3<double> &A, const std::vector<ModuleBase::Vector3<double>> &ion_vel)
     {
+        // Electromagnetic coupling and nuclear motion are independent, so the field switch leaves the velocity phase active.
         if (nonlocal_field_)
         {
             A_ha_ = A;
         }
+        // Own the sampled velocities so later projector updates remain valid after the caller's temporary array expires.
+        ion_vel_ = ion_vel;
     }
     TDNonlocalPW(
         const int *isk_in,
@@ -51,6 +54,7 @@ class TDNonlocalPW : public OperatorPW<T, Device>
     mutable T *vkb_td = nullptr; // Time-dependent projector cache.
 
     ModuleBase::Vector3<double> A_ha_{0.0, 0.0, 0.0};
+    std::vector<ModuleBase::Vector3<double>> ion_vel_;
     Device *ctx = {};
     using resmem_complex_op = base_device::memory::resize_memory_op<T, Device>;
     using delmem_complex_op = base_device::memory::delete_memory_op<T, Device>;

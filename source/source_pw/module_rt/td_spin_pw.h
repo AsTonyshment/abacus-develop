@@ -50,6 +50,7 @@ class TDSpinPW
         const psi::Psi<Complex, Device> &psi,
         const ModuleBase::matrix &weights,
         const ModuleBase::Vector3<double> &a,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
         TDSpinResultPW *result);
     void onsite(
         const psi::Psi<Complex, Device> &psi,
@@ -84,7 +85,8 @@ class TDSpinPW
         const psi::Psi<Complex, Device> &psi,
         const elecstate::ElecState &state,
         const ModuleBase::Vector3<double> &a,
-        const ModuleBase::Vector3<double> &nonlocal_a);
+        const ModuleBase::Vector3<double> &nonlocal_a,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel);
 };
 } // namespace pw
 #endif

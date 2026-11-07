@@ -153,8 +153,8 @@ HamiltPW<T, Device>::HamiltPW(elecstate::Potential* pot_in,
     {
         Operator<T, Device>* nonlocal = nullptr;
 
-        // RT-TDDFT uses nonlocal_field to select vector-potential-shifted projectors in velocity gauge.
-        if (velocity_gauge)
+        // Both gauges require atomic velocity phases in the RT nonlocal operator.
+        if (is_tddft)
         {
             nonlocal = new TDNonlocalPW<T, Device>(isk, this->ppcell, ucell, wfc_basis, nonlocal_field);
         }
@@ -218,25 +218,26 @@ HamiltPW<T, Device>::~HamiltPW()
 }
 
 template <typename T, typename Device>
-void HamiltPW<T, Device>::bind_td_state(const Real* veff, const ModuleBase::Vector3<double>& A_ha)
+void HamiltPW<T, Device>::bind_td_state(
+    const Real *veff, const ModuleBase::Vector3<double> &A_ha, const std::vector<ModuleBase::Vector3<double>> &ion_vel)
 {
-    Operator<T, Device>* op = this->ops;
+    Operator<T, Device> *op = this->ops;
     while (op != nullptr)
     {
         if (op->get_cal_type() == calculation_type::pw_veff)
         {
-            static_cast<Veff<OperatorPW<T, Device>>*>(op)->set_veff(veff);
+            static_cast<Veff<OperatorPW<T, Device>> *>(op)->set_veff(veff);
         }
         else if (op->get_cal_type() == calculation_type::pw_ekinetic_td)
         {
-            static_cast<TDEkineticPW<T, Device>*>(op)->set_A_ha(A_ha);
+            static_cast<TDEkineticPW<T, Device> *>(op)->set_A_ha(A_ha);
         }
         else if (op->get_cal_type() == calculation_type::pw_nonlocal)
         {
-            TDNonlocalPW<T, Device>* td_nonlocal = dynamic_cast<TDNonlocalPW<T, Device>*>(op);
+            TDNonlocalPW<T, Device> *td_nonlocal = dynamic_cast<TDNonlocalPW<T, Device> *>(op);
             if (td_nonlocal != nullptr)
             {
-                td_nonlocal->set_A_ha(A_ha);
+                td_nonlocal->bind(A_ha, ion_vel);
             }
         }
         op = op->next_op;

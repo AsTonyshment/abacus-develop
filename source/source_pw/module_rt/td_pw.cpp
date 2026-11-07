@@ -83,17 +83,22 @@ double td_momentum_bound(const ModulePW::PW_Basis_K &basis, const double tpiba)
     return bound;
 }
 
-void ensure_td_vnl(
-    const UnitCell &cell,
-    const double unshifted_bound,
-    const ModuleBase::Vector3<double> &A_right_ha,
-    const ModuleBase::Vector3<double> &A_prop_ha,
-    pseudopot_cell_vnl *projectors)
+std::vector<ModuleBase::Vector3<double>> td_ion_vel(const UnitCell &cell, bool motion)
 {
-    ModuleBase::timer::start("pw", "ensure_td_vnl");
-    const double field_bound = std::max(A_right_ha.norm(), A_prop_ha.norm());
-    projectors->ensure_vnl_range(cell, unshifted_bound + field_bound);
-    ModuleBase::timer::end("pw", "ensure_td_vnl");
+    // In RT-TDDFT, explicit zero velocities can yield a nonzero dE/dv, while an empty array disables the velocity phase.
+    std::vector<ModuleBase::Vector3<double>> vel;
+    if (motion)
+    {
+        vel.reserve(cell.nat);
+        for (int it = 0; it < cell.ntype; ++it)
+        {
+            for (int ia = 0; ia < cell.atoms[it].na; ++ia)
+            {
+                vel.push_back(cell.atoms[it].vel[ia]);
+            }
+        }
+    }
+    return vel;
 }
 
 } // namespace pw

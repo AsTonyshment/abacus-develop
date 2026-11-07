@@ -7,10 +7,11 @@ namespace hamilt
 {
 
 template <typename T, typename Device>
-Nonlocal<OperatorPW<T, Device>>::Nonlocal(const int* isk_in,
-                                          const pseudopot_cell_vnl* ppcell_in,
-                                          const UnitCell* ucell_in,
-                                          const ModulePW::PW_Basis_K* wfc_basis)
+Nonlocal<OperatorPW<T, Device>>::Nonlocal(
+    const int *isk_in,
+    const pseudopot_cell_vnl *ppcell_in,
+    const UnitCell *ucell_in,
+    const ModulePW::PW_Basis_K *wfc_basis)
 {
     if (isk_in == nullptr || ppcell_in == nullptr || ucell_in == nullptr || wfc_basis == nullptr)
     {
@@ -38,9 +39,9 @@ void Nonlocal<OperatorPW<T, Device>>::init(const int ik_in)
     // Calculate nonlocal pseudopotential vkb
     if (this->ppcell->nkb > 0) // xiaohui add 2013-09-02. Attention...
     {
-        // nonlocal_a is only needed by RT-TDDFT
+        // Empty velocities retain ordinary PW projectors; the nuclear velocity phase is used only in RT-TDDFT.
         const ModuleBase::Vector3<double> nonlocal_a{0.0, 0.0, 0.0};
-        this->ppcell->getvnl(this->ctx, *this->ucell, this->ik, nonlocal_a, this->vkb, this->wfcpw->npwk_max);
+        this->ppcell->getvnl(this->ctx, *this->ucell, this->ik, nonlocal_a, {}, this->vkb, this->wfcpw->npwk_max);
     }
 
     if (this->next_op != nullptr)
@@ -52,31 +53,33 @@ void Nonlocal<OperatorPW<T, Device>>::init(const int ik_in)
 }
 
 template <typename T, typename Device>
-void Nonlocal<OperatorPW<T, Device>>::act(const int nbands,
-                                          const int nbasis,
-                                          const int npol,
-                                          const T* tmpsi_in,
-                                          T* tmhpsi,
-                                          const int ngk_ik,
-                                          const bool is_first_node) const
+void Nonlocal<OperatorPW<T, Device>>::act(
+    const int nbands,
+    const int nbasis,
+    const int npol,
+    const T *tmpsi_in,
+    T *tmhpsi,
+    const int ngk_ik,
+    const bool is_first_node) const
 {
-    this->workspace_.apply(*this->ucell,
-                           *this->ppcell,
-                           *this->wfcpw,
-                           this->isk[this->ik],
-                           nbands,
-                           nbasis,
-                           npol,
-                           ngk_ik,
-                           is_first_node,
-                           this->vkb,
-                           tmpsi_in,
-                           tmhpsi);
+    this->workspace_.apply(
+        *this->ucell,
+        *this->ppcell,
+        *this->wfcpw,
+        this->isk[this->ik],
+        nbands,
+        nbasis,
+        npol,
+        ngk_ik,
+        is_first_node,
+        this->vkb,
+        tmpsi_in,
+        tmhpsi);
 }
 
 template <typename T, typename Device>
 template <typename T_in, typename Device_in>
-hamilt::Nonlocal<OperatorPW<T, Device>>::Nonlocal(const Nonlocal<OperatorPW<T_in, Device_in>>* nonlocal)
+hamilt::Nonlocal<OperatorPW<T, Device>>::Nonlocal(const Nonlocal<OperatorPW<T_in, Device_in>> *nonlocal)
 {
     this->classname = "Nonlocal";
     this->cal_type = calculation_type::pw_nonlocal;
@@ -94,16 +97,8 @@ hamilt::Nonlocal<OperatorPW<T, Device>>::Nonlocal(const Nonlocal<OperatorPW<T_in
 
 template class Nonlocal<OperatorPW<std::complex<float>, base_device::DEVICE_CPU>>;
 template class Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_CPU>>;
-// template Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_CPU>>::Nonlocal(const
-// Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_CPU>> *nonlocal);
 #if ((defined __CUDA) || (defined __ROCM))
 template class Nonlocal<OperatorPW<std::complex<float>, base_device::DEVICE_GPU>>;
 template class Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_GPU>>;
-// template Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_CPU>>::Nonlocal(const
-// Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_GPU>> *nonlocal); template
-// Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_GPU>>::Nonlocal(const
-// Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_CPU>> *nonlocal); template
-// Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_GPU>>::Nonlocal(const
-// Nonlocal<OperatorPW<std::complex<double>, base_device::DEVICE_GPU>> *nonlocal);
 #endif
 } // namespace hamilt

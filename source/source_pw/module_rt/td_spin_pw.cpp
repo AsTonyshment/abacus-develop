@@ -213,6 +213,7 @@ void TDSpinPW<Real, Device>::soc(
     const psi::Psi<Complex, Device> &psi,
     const ModuleBase::matrix &weights,
     const ModuleBase::Vector3<double> &a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel,
     TDSpinResultPW *result)
 {
     const UnitCell &cell = *cell_;
@@ -246,7 +247,7 @@ void TDSpinPW<Real, Device>::soc(
         const int npw = basis.npwk[ik];
         if (npw > 0)
         {
-            pp.getvnl(context, cell, ik, a, beta, basis.npwk_max);
+            pp.getvnl(context, cell, ik, a, ion_vel, beta, basis.npwk_max);
         }
         nonlocal_.project_contract(cell, pp, basis, 0, ncols, ld_psi, 2, npw, beta, psi.get_pointer());
         if (basis.poolrank != 0)
@@ -377,7 +378,8 @@ TDSpinResultPW TDSpinPW<Real, Device>::calculate(
     const psi::Psi<Complex, Device> &psi,
     const elecstate::ElecState &state,
     const ModuleBase::Vector3<double> &a,
-    const ModuleBase::Vector3<double> &nonlocal_a)
+    const ModuleBase::Vector3<double> &nonlocal_a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel)
 {
     ModuleBase::timer::start("TDSpinPW", "calculate");
     if (cell_ == nullptr)
@@ -398,7 +400,7 @@ TDSpinResultPW TDSpinPW<Real, Device>::calculate(
     }
     if (calc_torque_)
     {
-        soc(psi, state.wg, nonlocal_a, &result);
+        soc(psi, state.wg, nonlocal_a, ion_vel, &result);
     }
     // Observable evaluation must preserve the caller's k-point cursor.
     psi.fix_k(old_k);

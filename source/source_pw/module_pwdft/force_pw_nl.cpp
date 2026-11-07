@@ -12,6 +12,7 @@ template <typename FPTYPE, typename Device>
 void Forces<FPTYPE, Device>::cal_force_nl(
     ModuleBase::matrix &forcenl,
     const ModuleBase::Vector3<double> &nonlocal_a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel,
     const ModuleBase::matrix &wg,
     const ModuleBase::matrix &ekb,
     const K_Vectors *p_kv,
@@ -50,8 +51,8 @@ void Forces<FPTYPE, Device>::cal_force_nl(
             }
         }
         const int npm = nbands_occ;
-        // RT-TDDFT supplies the selected vector potential shift; ground-state calls pass zero.
-        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a);
+        // RT-TDDFT evaluates the position force at fixed nuclear velocities; non-RT callers supply empty velocities.
+        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a, ion_vel);
         // calculate becp = <psi|beta> for all beta functions
         nl_tools.cal_becp(ik, npm, &psi_in[0](ik, 0, 0));
         nl_tools.reduce_pool_becp(max_nbands);

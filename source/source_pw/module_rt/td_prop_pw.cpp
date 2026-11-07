@@ -47,13 +47,16 @@ std::unique_ptr<TDPropPW<T, Device>> make_td_prop(
         prop.reset(new ETRSPropPW<T, Device>(exp_ctrl, npol, global_k, comm, log));
     }
 
-    return std::unique_ptr<TDPropPW<T, Device>>(new TDPropPW<T, Device>(basis, std::move(orb_ops), std::move(prop)));
+    return std::unique_ptr<TDPropPW<T, Device>>(new TDPropPW<T, Device>(basis, std::move(orb_ops), std::move(prop), input.td_nl_motion));
 }
 
 template <typename T, typename Device>
 TDPropPW<T, Device>::TDPropPW(
-    const ModulePW::PW_Basis_K &basis, std::unique_ptr<hsolver::TDOrbOps<T, Device>> orb_ops, std::unique_ptr<PWProp<T, Device>> prop)
-    : basis_(basis), orb_ops_(std::move(orb_ops)), prop_(std::move(prop))
+    const ModulePW::PW_Basis_K &basis,
+    std::unique_ptr<hsolver::TDOrbOps<T, Device>> orb_ops,
+    std::unique_ptr<PWProp<T, Device>> prop,
+    bool motion)
+    : basis_(basis), motion_(motion), orb_ops_(std::move(orb_ops)), prop_(std::move(prop))
 {
 }
 
@@ -84,10 +87,10 @@ void TDPropPW<T, Device>::evolve(
     int scf_iter,
     bool log_detail)
 {
-    TDHamiltPW<T, Device> td_hamilt(hamilt, basis_, ions);
+    TDHamiltPW<T, Device> td_hamilt(hamilt, basis_, ions, motion_);
     prop_->evolve(&td_hamilt, history, veff, nveff, field, sample, right, current, elec_step, scf_iter, log_detail);
     orb_ops_->correct(current, elec_step, scf_iter, log_detail);
-    // Restore endpoint operators after midpoint or left-endpoint propagation for density and band-energy evaluation.
+    // Restore endpoint geometry, velocities and fields after propagation for density and band-energy evaluation.
     const ModuleBase::Vector3<double> &vecpot_ha = field.A_right_ha();
     td_hamilt.bind(veff, vecpot_ha, right);
 }
