@@ -35,60 +35,6 @@ ESolver_KS_PW_TDDFT<T, Device>::ESolver_KS_PW_TDDFT() : log_(GlobalV::ofs_runnin
 }
 
 template <typename T, typename Device>
-double ESolver_KS_PW_TDDFT<T, Device>::cal_energy()
-{
-    return md_energy_;
-}
-
-template <typename T, typename Device>
-void ESolver_KS_PW_TDDFT<T, Device>::cal_force(BaseCell &basecell, ModuleBase::matrix &force)
-{
-    ModuleBase::timer::start("ESolver_KS_PW_TDDFT", "cal_force");
-
-    // 1) Reuse the PW position and direct field forces at the accepted RT-TDDFT endpoint.
-    ESolver_KS_PW<T, Device>::cal_force(basecell, force);
-
-    const UnitCell &cell = static_cast<const UnitCell &>(basecell);
-    ModuleBase::matrix hess(cell.nat, 6);
-    ModuleBase::matrix rate(cell.nat, 3);
-    if (this->inp_->td_nl_motion && this->inp_->vnl_in_h)
-    {
-        // 2) Bind the propagated Hamiltonian independently of the position-force coupling selected by td_vg_nl.
-        hamilt::HamiltPW<T, Device> &hamilt = *static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
-        const Real *veff = this->pelec->pot->template get_veff_smooth_data<Real>();
-        const ModuleBase::Vector3<double> &a = this->field_->A_right_ha();
-        ModuleBase::Vector3<double> nl_a{0.0, 0.0, 0.0};
-        ModuleBase::Vector3<double> adot{0.0, 0.0, 0.0};
-        if (this->field_->gauge() == 1 && this->inp_->td_vg_nl != 0)
-        {
-            nl_a = a;
-            adot = this->field_->efield_ha() * -1.0;
-        }
-        const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(cell, true);
-        hamilt.bind_td_state(veff, a, vel);
-        hamilt::HamiltHSOperator<T, Device> op(&hamilt, this->pw_wfc);
-        const psi::Psi<T, Device> &wave = *this->stp.template get_psi_t<T, Device>();
-        pi_calc_.cal_pi_derivs(cell, *this->pw_wfc, this->kv, &this->ppcell, wave, this->pelec->wg, nl_a, adot, vel, &op, &hess, &rate);
-    }
-
-    // 3) Solve free ionic directions in Hartree units and return the physical force in the existing Ry/Bohr convention.
-    ModuleBase::matrix force_ha(force);
-    force_ha *= 0.5;
-    ion_accel_ = pw::cal_ion_acc(cell, force_ha, hess, rate);
-    // Add dPi/dt to the returned RT-TDDFT force while keeping constraint reactions available as a separate result.
-    for (int ia = 0; ia < cell.nat; ++ia)
-    {
-        for (int d = 0; d < 3; ++d)
-        {
-            force(ia, d) += 2.0 * ion_accel_.dpi(ia, d);
-        }
-    }
-    ModuleIO::out_ion_force(cell, ion_accel_, force, this->inp_->td_out_stat, GlobalV::MY_RANK, log_);
-
-    ModuleBase::timer::end("ESolver_KS_PW_TDDFT", "cal_force");
-}
-
-template <typename T, typename Device>
 void ESolver_KS_PW_TDDFT<T, Device>::before_all_runners(BaseCell &basecell, const Input_para &inp)
 {
     basecell.require_kind(BaseCell::Kind::unitcell, __FUNCTION__);
@@ -638,6 +584,60 @@ void ESolver_KS_PW_TDDFT<T, Device>::rebuild_end(UnitCell *cell)
         this->inp_->sc_mag_switch,
         this->inp_->dft_plus_u,
         this->inp_->assume_isolated);
+}
+
+template <typename T, typename Device>
+double ESolver_KS_PW_TDDFT<T, Device>::cal_energy()
+{
+    return md_energy_;
+}
+
+template <typename T, typename Device>
+void ESolver_KS_PW_TDDFT<T, Device>::cal_force(BaseCell &basecell, ModuleBase::matrix &force)
+{
+    ModuleBase::timer::start("ESolver_KS_PW_TDDFT", "cal_force");
+
+    // 1) Reuse the PW position and direct field forces at the accepted RT-TDDFT endpoint.
+    ESolver_KS_PW<T, Device>::cal_force(basecell, force);
+
+    const UnitCell &cell = static_cast<const UnitCell &>(basecell);
+    ModuleBase::matrix hess(cell.nat, 6);
+    ModuleBase::matrix rate(cell.nat, 3);
+    if (this->inp_->td_nl_motion && this->inp_->vnl_in_h)
+    {
+        // 2) Bind the propagated Hamiltonian independently of the position-force coupling selected by td_vg_nl.
+        hamilt::HamiltPW<T, Device> &hamilt = *static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
+        const Real *veff = this->pelec->pot->template get_veff_smooth_data<Real>();
+        const ModuleBase::Vector3<double> &a = this->field_->A_right_ha();
+        ModuleBase::Vector3<double> nl_a{0.0, 0.0, 0.0};
+        ModuleBase::Vector3<double> adot{0.0, 0.0, 0.0};
+        if (this->field_->gauge() == 1 && this->inp_->td_vg_nl != 0)
+        {
+            nl_a = a;
+            adot = this->field_->efield_ha() * -1.0;
+        }
+        const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(cell, true);
+        hamilt.bind_td_state(veff, a, vel);
+        hamilt::HamiltHSOperator<T, Device> op(&hamilt, this->pw_wfc);
+        const psi::Psi<T, Device> &wave = *this->stp.template get_psi_t<T, Device>();
+        pi_calc_.cal_pi_derivs(cell, *this->pw_wfc, this->kv, &this->ppcell, wave, this->pelec->wg, nl_a, adot, vel, &op, &hess, &rate);
+    }
+
+    // 3) Solve free ionic directions in Hartree units and return the physical force in the existing Ry/Bohr convention.
+    ModuleBase::matrix force_ha(force);
+    force_ha *= 0.5;
+    ion_accel_ = pw::cal_ion_acc(cell, force_ha, hess, rate);
+    // Add dPi/dt to the returned RT-TDDFT force while keeping constraint reactions available as a separate result.
+    for (int ia = 0; ia < cell.nat; ++ia)
+    {
+        for (int d = 0; d < 3; ++d)
+        {
+            force(ia, d) += 2.0 * ion_accel_.dpi(ia, d);
+        }
+    }
+    ModuleIO::out_ion_force(cell, ion_accel_, force, this->inp_->td_out_stat, GlobalV::MY_RANK, log_);
+
+    ModuleBase::timer::end("ESolver_KS_PW_TDDFT", "cal_force");
 }
 
 template class ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>;
