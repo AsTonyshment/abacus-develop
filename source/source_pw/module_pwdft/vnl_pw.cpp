@@ -22,9 +22,9 @@
  * - rescale_vnl(): rescale tab/tab_dq/tab_at/qrad when the cell volume changes
  * - get_*_data<T>() template specializations for CPU/GPU typed pointer access
  *
- * Heavy logic (getvnl, init_vnl, qrad, deeq, alpha channel) lives in:
+ * Projector evaluation, initialization, augmentation and radial derivatives live in:
  *   vnl_pw_getvnl.cpp, vnl_pw_init_vnl.cpp, vnl_pw_qrad.cpp,
- *   vnl_pw_deeq.cpp, vnl_pw_alpha.cpp, vnl_pw_grad.cpp
+ *   vnl_pw_deeq.cpp, vnl_pw_grad.cpp, vnl_pw_table.cpp
  */
 
 pseudopot_cell_vnl::pseudopot_cell_vnl() { this->use_gpu_ = (PARAM.inp.device == "gpu"); }
@@ -34,7 +34,7 @@ pseudopot_cell_vnl::~pseudopot_cell_vnl() {}
 void pseudopot_cell_vnl::release_memory()
 {
     // Release RT-TDDFT velocity and projector-index caches together with the shared PW scratch buffers.
-    for (std::array<ct::Tensor, 2> *buffers : {&vnl_ylm_, &vnl_radial_, &vnl_momentum_, &vnl_structure_, &vnl_vel_})
+    for (std::array<ct::Tensor, 2> *buffers : {&vnl_ylm_, &vnl_radial_, &vnl_momentum_, &vnl_structure_, &vnl_vel_, &vnl_mom_})
     {
         for (ct::Tensor &buffer : *buffers)
         {
@@ -46,6 +46,10 @@ void pseudopot_cell_vnl::release_memory()
     std::vector<int>().swap(vnl_host_meta_);
     std::vector<int>().swap(vnl_host_atom_counts_);
     std::vector<ModuleBase::Vector3<double>>().swap(vnl_host_momentum_);
+    tab_d2.create(1, 1, 1);
+    rad_mom.create(1, 1, 1);
+    hess_version_ = 0;
+    mom_ver_.fill(0);
     if (this->nhm <= 0 || memory_released)
     {
         return;
@@ -214,17 +218,12 @@ void pseudopot_cell_vnl::init(
         }
         this->dvan.create(ntype, this->nhm, this->nhm);
         this->dvan_so.create(PARAM.inp.nspin, ntype, this->nhm, this->nhm);
-
-        this->ijtoh.create(ntype, this->nhm, this->nhm);
-        this->qq_at.create(ucell.nat, this->nhm, this->nhm);
     }
     else
     {
         GlobalV::ofs_running << "\n nhm = 0, not allocate some matrix.";
     }
 
-    // nqxq = ((sqrt(gcutm)+sqrt(xqq[1]*xqq[1]+xqq[2]*xqq[2]+xqq[3]*xqq[3])/
-    // dq+4)*cell_factor;
     this->lmaxq = 2 * this->lmaxkb + 1;
     int npwx = this->wfcpw->npwk_max;
     this->vkbnc = npwx;
@@ -240,9 +239,6 @@ void pseudopot_cell_vnl::init(
         // Column dimension is stored in vkbnc for gemm/gemv leading dimension.
         // Actual GPU buffers (c_vkb/z_vkb) are allocated below.
     }
-
-    // this->nqx = 10000;        // calculted in allocate_nlpot.f90
-    // PARAM.globalv.nqxq = static_cast<int>(((sqrt(INPUT.ecutrho) + qnorm) / PARAM.globalv.dq + 4.0) * cell_factor);
 
     // mohan update 2021-02-22
     // liuyu update 2023-09-28
@@ -323,10 +319,16 @@ void pseudopot_cell_vnl::print_vnl(std::ofstream &ofs) { output::printr3_d(ofs, 
 void pseudopot_cell_vnl::rescale_vnl(const double &omega_in)
 {
     const bool gradient_current = this->gradient_version_ == this->table_version_;
+    const bool hess_current = this->hess_version_ == this->table_version_;
     ++this->table_version_;
     if (gradient_current)
     {
         this->gradient_version_ = this->table_version_;
+    }
+    // An existing RT-TDDFT Hessian table remains current when its normalization is rescaled with the projector table.
+    if (hess_current)
+    {
+        this->hess_version_ = this->table_version_;
     }
     const double ratio = this->omega_old / omega_in;
     const double sqrt_ratio = std::sqrt(ratio);
@@ -339,6 +341,18 @@ void pseudopot_cell_vnl::rescale_vnl(const double &omega_in)
     for (int i = 0; i < this->tab_dq.getSize(); ++i)
     {
         this->tab_dq.ptr[i] *= sqrt_ratio;
+    }
+    for (int i = 0; i < this->tab_d2.getSize(); ++i)
+    {
+        this->tab_d2.ptr[i] *= sqrt_ratio;
+    }
+    for (int i = 0; i < this->rad_mom.getSize(); ++i)
+    {
+        // Only the five origin coefficients carry volume normalization; the sixth entry stores the radial extent.
+        if (i % 6 < 5)
+        {
+            this->rad_mom.ptr[i] *= sqrt_ratio;
+        }
     }
     for (int i = 0; i < this->tab_at.getSize(); i++)
     {

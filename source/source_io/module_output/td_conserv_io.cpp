@@ -14,19 +14,25 @@ void write_td_energy(
     const std::string &directory,
     int step,
     double dt_ha,
-    double material,
-    double hamilton,
-    double electronic_field,
-    double ionic_field,
+    double potential,
+    double total,
+    double total_field,
+    double kinetic,
+    double vel_corr,
+    double smearing,
+    double elec_field,
+    double ion_field,
     std::ostream &log)
 {
     const std::string filename = directory + "td_energy.txt";
     const std::ios::openmode mode = step == 0 ? std::ios::out | std::ios::trunc : std::ios::app;
     std::ofstream output(filename, mode);
+
     if (!output)
     {
         ModuleBase::WARNING_QUIT("write_td_energy", "Cannot open " + filename);
     }
+
     if (step == 0)
     {
         std::string full_path = filename;
@@ -42,21 +48,24 @@ void write_td_energy(
         log << " Write file: " << full_path << '\n';
         output << "# energy_unit=Rydberg\n";
         output << std::left << std::setw(6) << "#step" << "  " << std::right << std::setw(10) << "time_fs";
-        for (const char *label : {"material", "hamilton", "electronic_field", "ionic_field"})
+        for (const char *label :
+            {"potential", "total", "total_field", "ionic_kinetic", "velocity_corr", "smearing", "electronic_field", "ionic_field"})
         {
             output << "  " << std::setw(19) << label;
         }
         output << '\n';
     }
+
     output << std::right << std::setw(6) << step + 1 << "  " << std::fixed << std::setprecision(6) << std::setw(10)
            << step * dt_ha * ModuleBase::AU_to_FS;
     output << std::scientific << std::setprecision(12);
-    for (double energy : {material, hamilton, electronic_field, ionic_field})
+    for (double energy : {potential, total, total_field, kinetic, vel_corr, smearing, elec_field, ion_field})
     {
         output << "  " << std::setw(19) << energy;
     }
     output << '\n';
     output.close();
+
     if (!output)
     {
         ModuleBase::WARNING_QUIT("write_td_energy", "Failed to write " + filename);

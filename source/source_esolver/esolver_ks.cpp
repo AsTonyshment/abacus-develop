@@ -65,9 +65,6 @@ void ESolver_KS::before_all_runners(BaseCell& basecell, const Input_para& inp)
     this->niter = maxniter;
     this->drho = 0.0;
 
-    // cell_factor
-    this->ppcell.cell_factor = inp.cell_factor;
-
     //! 3) setup charge mixing
     p_chgmix = new Charge_Mixing();
     // Aggregate-initialize MixingConfig so that adding a field without

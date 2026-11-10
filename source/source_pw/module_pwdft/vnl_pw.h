@@ -13,178 +13,143 @@
 
 #include <array>
 #include <vector>
-#ifdef __LCAO
-#include "source_basis/module_ao/orb_gaunt_table.h"
-#endif
 
-//==========================================================
-// Calculate the non-local pseudopotential in reciprocal
-// space using plane wave as basis set.
-//==========================================================
+//! Nonlocal pseudopotential projectors and augmentation terms in a plane-wave basis.
 class pseudopot_cell_vnl
 {
-
   public:
     pseudopot_cell_vnl();
     ~pseudopot_cell_vnl();
+
+    /**
+     * @brief Set projector dimensions and allocate tables and buffers.
+     * @param[in] cell Atomic types and pseudopotentials.
+     * @param[in] psf_in Structure-factor provider.
+     * @param[in] wfc_basis Wavefunction plane-wave basis.
+     * @param[in] allocate_vkb Whether to allocate the CPU vkb matrix.
+     */
     void init(
         const UnitCell &cell,
         Structure_Factor *psf_in,
         const ModulePW::PW_Basis_K *wfc_basis = nullptr,
         const bool allocate_vkb = true);
 
-    double cell_factor = 0.0; // LiuXh add 20180619
+    int nkb = 0;    // Total projectors over all atoms, including angular components.
+    int lmaxkb = 0; // Maximum projector angular momentum; -1 for no projectors.
 
-    int nkb = 0; // total number of beta functions considering all atoms
-
-    int lmaxkb = 0; // max angular momentum for non-local projectors
-
+    /**
+     * @brief Initialize projector tables, bare D coefficients and USPP overlaps.
+     * @param[in,out] cell Pseudopotentials, including USPP angular-channel limits to adjust.
+     * @param[in] rho_basis Density basis for G=0 augmentation integrals.
+     */
     void init_vnl(UnitCell &cell, const ModulePW::PW_Basis *rho_basis);
 
+    //! Rescale radial data to volume omega_in in cubic Bohr.
     void rescale_vnl(const double &omega_in);
 
-    /** @brief Ensure four-point interpolation covers qmax (inverse Bohr), without changing dq. */
+    //! Extend the radial table for four-point interpolation up to qmax in inverse Bohr.
     void ensure_vnl_range(const UnitCell &cell, const double &qmax);
 
-    /** @brief Reject non-finite or out-of-range dimensionless interpolation indices before reading. */
+    //! Check the interpolation index against tab and, if derivative is true, tab_dq.
     void check_vnl_index(const double &index, const bool &derivative) const;
 
-    /** @brief Return the momentum spacing shared by the radial projector and derivative tables. */
+    //! Return the radial momentum-grid spacing in inverse Bohr.
     double table_dq() const { return table_dq_; }
 
     /**
-     * @brief Build nonlocal projectors at G+k+A-v_I; ground-state calls pass zero A and empty velocities.
-     *
-     * @param ctx Device context.
-     * @param ucell Unit cell defining reciprocal-space units.
-     * @param ik K-point index.
-     * @param vector_potential RT-TDDFT nonlocal momentum shift in Hartree atomic units; zero for ground-state calls.
-     * @param ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units; non-RT callers pass an empty vector.
-     * @param vkb_in Output projector buffer.
-     * @param lead_dim Stride between projectors in complex elements, at least the local npw.
+     * @brief Build nonlocal projectors at G+k+A-v_I.
+     * @param[in] ctx Device context.
+     * @param[in] ucell Cell geometry and atom ordering.
+     * @param[in] ik Local k-point index.
+     * @param[in] vecpot RT-TDDFT momentum shift in Hartree atomic units.
+     * @param[in] ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units.
+     * @param[out] vkb_in Projectors stored as vkb_in[projector * lead_dim + ig].
+     * @param[in] lead_dim Projector stride, at least the local plane-wave count.
      */
     template <typename FPTYPE, typename Device>
     void getvnl(
         Device *ctx,
         const UnitCell &ucell,
         const int &ik,
-        const ModuleBase::Vector3<double> &vector_potential,
+        const ModuleBase::Vector3<double> &vecpot,
         const std::vector<ModuleBase::Vector3<double>> &ion_vel,
         std::complex<FPTYPE> *vkb_in,
         int lead_dim) const;
 
-    // void getvnl_alpha(const int &ik);
-
-    void init_vnl_alpha(const UnitCell &cell);
-
+    //! Rebuild the radial first-derivative table by Bessel quadrature.
     void initgradq_vnl(const UnitCell &cell);
-    /** @brief Generation of radial tables, including volume rescaling. */
+    //! Return the radial-table revision.
     size_t table_version() const { return table_version_; }
-    /** @brief Prepare the derivative table only when the radial table changed. */
+    //! Refresh the first-derivative table when outdated.
     void ensure_grad_table(const UnitCell &cell);
-
-    //===============================================================
-    // MEMBER VARIABLES :
-    // NAME : nqx(number of interpolation points)
-    // NAME : nqxq(size of interpolation table)
-    // NAME : nhm(max number of different beta functions per atom)
-    // NAME : lmaxq
-    // NAME : dq(space between points in the pseudopotential tab)
-    //===============================================================
-    // private:
+    //! Prepare radial second derivatives for RT-TDDFT ionic inertia.
+    void ensure_hess(const UnitCell &cell);
 
   private:
-    double table_dq_ = 0.0;
-    size_t table_version_ = 1;
-    size_t gradient_version_ = 0;
+    double table_dq_ = 0.0;       // Radial momentum-grid spacing in inverse Bohr.
+    size_t table_version_ = 1;    // Current radial-table revision.
+    size_t gradient_version_ = 0; // Revision of tab_dq.
+    size_t hess_version_ = 0;     // Revision of tab_d2.
 
   public:
-    int nhm = 0;
-    int nbetam = 0; // max number of beta functions
+    int nhm = 0;    // Maximum projectors per atom, including angular components.
+    int nbetam = 0; // Maximum radial projector channels per type.
+    int lmaxq = 0;  // Augmentation angular-channel count: 2*lmaxkb+1.
 
-    int lmaxq = 0;
+    ModuleBase::matrix indv;   // Radial channel for each (type, projector).
+    ModuleBase::matrix nhtol;  // Angular momentum l for each (type, projector).
+    ModuleBase::matrix nhtolm; // Real-harmonic index l*l+m, m in [0, 2*l], for each (type, projector).
+    ModuleBase::matrix nhtoj;  // Total angular momentum j for each (type, projector).
 
-    ModuleBase::matrix indv;   // indes linking  atomic beta's to beta's in the solid
-    ModuleBase::matrix nhtol;  // correspondence n <-> angular momentum l
-    ModuleBase::matrix nhtolm; // correspondence n <-> combined lm index for (l,m)
-    ModuleBase::matrix nhtoj;  //
+    ModuleBase::realArray dvan;       // Bare D(type, projector, projector).
+    ModuleBase::ComplexArray dvan_so; // Bare SOC D(spin block, type, projector, projector); added by zhengdy-soc
 
-    ModuleBase::realArray dvan;       //(:,:,:),  the D functions of the solid
-    ModuleBase::ComplexArray dvan_so; //(:,:,:),  spin-orbit case,  added by zhengdy-soc
+    ModuleBase::realArray tab;     // Radial projectors (type, channel, momentum), normalized by 4*pi/sqrt(volume).
+    ModuleBase::realArray tab_at;  // Atomic radial transforms (type, orbital, momentum).
+    ModuleBase::realArray tab_dq;  // First momentum derivatives of tab.
+    ModuleBase::realArray tab_d2;  // Second momentum derivatives for RT-TDDFT ionic inertia.
+    ModuleBase::realArray rad_mom; // Five origin coefficients and rmax per radial channel.
 
-    ModuleBase::realArray tab; //(:,:,:), interpolation table for PPs: 4pi/sqrt(V) * \int betar(r)jl(qr)rdr
-    ModuleBase::realArray tab_alpha;
-    ModuleBase::realArray tab_at; //(:,:,:), interpolation table for atomic wfc
-    ModuleBase::realArray tab_dq; // 4pi/sqrt(V) * \int betar(r)*djl(qr)/d(qr)*r^2 dr
-
-    ModuleBase::realArray deeq; //(:,:,:,:), the integral of V_eff and Q_{nm}
-    bool multi_proj = false;
-    float *s_deeq = nullptr;
-    double *d_deeq = nullptr;
-    ModuleBase::ComplexArray deeq_nc;          //(:,:,:,:), the spin-orbit case
-    std::complex<float> *c_deeq_nc = nullptr;  // GPU array of deeq_nc
-    std::complex<double> *z_deeq_nc = nullptr; // GPU array of deeq_nc
+    ModuleBase::realArray deeq;                // Effective D(spin, atom, projector, projector).
+    bool multi_proj = false;                   // Nonzero off-diagonal scalar D coefficients.
+    float *s_deeq = nullptr;                   // Single-precision deeq copy.
+    double *d_deeq = nullptr;                  // Double-precision deeq device copy or CPU alias.
+    ModuleBase::ComplexArray deeq_nc;          // Spinor D(spin block, atom, projector, projector).
+    std::complex<float> *c_deeq_nc = nullptr;  // Single-precision deeq_nc copy.
+    std::complex<double> *z_deeq_nc = nullptr; // Double-precision deeq_nc device copy or CPU alias.
 
     // liuyu add 2023-10-03
-    // uspp
-    std::vector<int> indv_ijkb0;    // first beta (index in the solid) for each atom
-    ModuleBase::IntArray ijtoh;     // correspondence beta indexes ih,jh -> composite index ijh
-    ModuleBase::realArray qq_at;    // the integral of q functions in the solid (ONE PER ATOM)
-    ModuleBase::realArray qq_nt;    // the integral of q functions in the solid (ONE PER NTYP) used to be the qq array
-    ModuleBase::ComplexArray qq_so; // Q_{nm} for spin-orbit case
-    ModuleBase::realArray ap;       // the expansion coefficients
-    ModuleBase::IntArray lpx;       // for each input limi,ljmj is the number of LM in the sum
-    ModuleBase::IntArray lpl;       // for each input limi,ljmj points to the allowed LM
-    ModuleBase::realArray qrad;     // radial FT of Q functions
+    // USPP augmentation and overlap data.
+    std::vector<int> indv_ijkb0;    // First global projector index per atom.
+    ModuleBase::realArray qq_nt;    // Augmentation integrals (type, projector, projector).
+    ModuleBase::ComplexArray qq_so; // Spinor augmentation integrals (type, spin block, projector, projector).
+    ModuleBase::realArray ap;       // Real-harmonic product coefficients (LM, lm1, lm2).
+    ModuleBase::IntArray lpx;       // Allowed LM count per harmonic pair (lm1, lm2).
+    ModuleBase::IntArray lpl;       // Allowed LM indices per harmonic pair (lm1, lm2).
+    ModuleBase::realArray qrad;     // Augmentation radial transforms (type, L, packed radial pair, momentum).
 
-    float *s_qq_nt = nullptr;
-    double *d_qq_nt = nullptr;
-    std::complex<float> *c_qq_so = nullptr;  // GPU array of qq_so
-    std::complex<double> *z_qq_so = nullptr; // GPU array of qq_so
+    float *s_qq_nt = nullptr;                // Single-precision qq_nt copy.
+    double *d_qq_nt = nullptr;               // Double-precision qq_nt device copy or CPU alias.
+    std::complex<float> *c_qq_so = nullptr;  // Single-precision qq_so copy.
+    std::complex<double> *z_qq_so = nullptr; // Double-precision qq_so device copy or CPU alias.
 
-    mutable ModuleBase::ComplexMatrix vkb; // all beta functions in reciprocal space
-    std::complex<double> ***vkb1_alpha;
-    std::complex<double> ***vkb_alpha;
-    Structure_Factor *psf = nullptr;
+    mutable ModuleBase::ComplexMatrix vkb; // CPU projectors (global projector, local plane wave).
+    Structure_Factor *psf = nullptr;       // Non-owning structure-factor provider.
 
-    // Column dimension of vkb matrix (= npwx), used as leading dimension in gemm/gemv.
-    // On GPU path vkb ComplexMatrix is not allocated to save CPU memory; this stores the dimension.
-    int vkbnc = 0;
+    int vkbnc = 0; // Projector leading dimension npwx.
 
-    // other variables
-    std::complex<double> Cal_C(
-        int alpha,
-        int lu,
-        int mu,
-        int L,
-        int M);
-
-    double CG(
-        int l1,
-        int m1,
-        int l2,
-        int m2,
-        int L,
-        int M);
-
+    //! Print the radial projector table.
     void print_vnl(std::ofstream &ofs);
 
     /**
-     * @brief Compute the radial Fourier transform of the Q functions
-     *
-     * The interpolation table for the radial Fourier transform is stored in qrad.
-     *
-     * The formula implemented here is:
-     *   \[ q(g,i,j) = \sum_\text{lm} (-i)^l \text{ap}(\text{lm},i,j)
-     *   \text{yr}_\text{lm}(g) \text{qrad}(g,l,i,j) \]
-     *
-     * @param ng [in] the number of G vectors
-     * @param ih [in] the first index of Q
-     * @param jh [in] the second index of Q
-     * @param itype [in] the atomic type
-     * @param qnorm [in] the norm of q+g vectors
-     * @param ylm [in] the real spherical harmonics
-     * @param qg [out] the Fourier transform of interest
+     * @brief Assemble augmentation Q(G) from radial tables and real harmonics.
+     * @param[in] ng Number of reciprocal vectors.
+     * @param[in] ih First angular-resolved projector index within the type.
+     * @param[in] jh Second angular-resolved projector index within the type.
+     * @param[in] itype Atomic type index.
+     * @param[in] qnorm Magnitudes in inverse Bohr, length ng.
+     * @param[in] ylm Real harmonics (LM, ig).
+     * @param[out] qg Q(G) without atomic-position phases, length ng.
      */
     void radial_fft_q(
         const int ng,
@@ -196,9 +161,15 @@ class pseudopot_cell_vnl
         std::complex<double> *qg) const;
 
     /**
-     * @brief Compute the radial Fourier transform using raw CPU pointers
-     *
-     * This template is instantiated for CPU float and double precision only.
+     * @brief Assemble augmentation Q(G) with raw CPU arrays in float or double precision.
+     * @param[in] ctx CPU device context.
+     * @param[in] ng Number of reciprocal vectors.
+     * @param[in] ih First angular-resolved projector index within the type.
+     * @param[in] jh Second angular-resolved projector index within the type.
+     * @param[in] itype Atomic type index.
+     * @param[in] qnorm Magnitudes in inverse Bohr, length ng.
+     * @param[in] ylm Real harmonics stored as ylm[LM * ng + ig].
+     * @param[out] qg Q(G) without atomic-position phases, length ng.
      */
     template <typename FPTYPE, typename Device>
     void radial_fft_q(
@@ -212,112 +183,116 @@ class pseudopot_cell_vnl
         std::complex<FPTYPE> *qg) const;
 
     /**
-     * @brief calculate the effective coefficient matrix for non-local pseudopotential projectors
-     *
-     * @param veff effective potential
-     * @param rho_basis potential FFT grids
-     * @param cell UnitCell
+     * @brief Assemble effective D coefficients, including USPP potential corrections.
+     * @param[in] veff Effective potential in Ry (spin component, local grid point).
+     * @param[in] rho_basis Density basis and FFT grids.
+     * @param[in] cell Atomic geometry and pseudopotentials.
      */
     void cal_effective_D(const ModuleBase::matrix &veff, const ModulePW::PW_Basis *rho_basis, UnitCell &cell);
-#ifdef __LCAO
-    ORB_gaunt_table MGT;
-#endif
 
+    //! Return projector angular momenta.
     template <typename FPTYPE>
     FPTYPE *get_nhtol_data() const;
+
+    //! Return projector real-harmonic indices.
     template <typename FPTYPE>
     FPTYPE *get_nhtolm_data() const;
+
+    //! Return the projector-to-radial-channel map.
     template <typename FPTYPE>
     FPTYPE *get_indv_data() const;
+
+    //! Return the radial projector table.
     template <typename FPTYPE>
     FPTYPE *get_tab_data() const;
+
+    //! Return scalar effective D coefficients.
     template <typename FPTYPE>
     FPTYPE *get_deeq_data() const;
+
+    //! Return type-resolved augmentation integrals.
     template <typename FPTYPE>
     FPTYPE *get_qq_nt_data() const;
+
+    //! Return spinor augmentation integrals.
     template <typename FPTYPE>
     std::complex<FPTYPE> *get_qq_so_data() const;
+
+    //! Return the internal projector buffer.
     template <typename FPTYPE>
     std::complex<FPTYPE> *get_vkb_data() const;
+
+    //! Return spinor effective D coefficients.
     template <typename FPTYPE>
     std::complex<FPTYPE> *get_deeq_nc_data() const;
 
+    //! Release owned buffers and projector caches.
     void release_memory();
 
   private:
-    // Reuse storage across k points and fields, with separate float and double capacities.
+    // Reusable projector buffers, indexed by precision: 0 for float, 1 for double.
     mutable std::array<ct::Tensor, 2> vnl_ylm_;
     mutable std::array<ct::Tensor, 2> vnl_radial_;
     mutable std::array<ct::Tensor, 2> vnl_momentum_;
     mutable std::array<ct::Tensor, 2> vnl_structure_;
-    mutable std::array<ct::Tensor, 2> vnl_vel_;
+    mutable std::array<ct::Tensor, 2> vnl_vel_;     // RT-TDDFT nuclear velocities.
+    mutable std::array<ct::Tensor, 2> vnl_mom_;     // Small-momentum expansion data.
+    mutable std::array<size_t, 2> mom_ver_{{0, 0}}; // Origin-data revision per precision.
+
+    // Projector channel and atom indices for RT-TDDFT traveling pseudopotentials.
     mutable ct::Tensor vnl_meta_;
     mutable std::vector<int> vnl_host_meta_;
+
+    // Atom counts by type for zero-velocity projectors.
     mutable ct::Tensor vnl_atom_counts_;
     mutable std::vector<int> vnl_host_atom_counts_;
-    mutable std::vector<ModuleBase::Vector3<double>> vnl_host_momentum_;
+    mutable std::vector<ModuleBase::Vector3<double>> vnl_host_momentum_; // Cartesian G+k+A in units of tpiba.
 
-    bool memory_released = false;
+    bool memory_released = false; // Whether raw-pointer buffers have been released.
+
+    // Single-precision index, radial-table and projector buffers.
     float *s_nhtol = nullptr;
     float *s_nhtolm = nullptr;
     float *s_indv = nullptr;
     float *s_tab = nullptr;
     std::complex<float> *c_vkb = nullptr;
 
+    // Double-precision device copies or CPU aliases; DSP uses separate projector storage.
     double *d_nhtol = nullptr;
     double *d_nhtolm = nullptr;
     double *d_indv = nullptr;
     double *d_tab = nullptr;
     std::complex<double> *z_vkb = nullptr;
 
-    const ModulePW::PW_Basis_K *wfcpw = nullptr;
+    const ModulePW::PW_Basis_K *wfcpw = nullptr; // Non-owning wavefunction basis.
 
-    Soc soc;
+    Soc soc; // Harmonic rotations and spin-orbit coupling coefficients.
 
-    double omega_old = 0;
-    bool use_gpu_ = false;
+    double omega_old = 0;  // Volume used to normalize radial tables.
+    bool use_gpu_ = false; // Use GPU buffers and transfers.
 
-    /** @brief Fill the allocated radial projector table using the original Bessel quadrature. */
+    //! Compute radial projectors and origin coefficients by quadrature.
     void fill_vnl_table(const UnitCell &cell);
 
-    /** @brief Refresh aliases and allocated precision/device copies after radial-table changes. */
+    //! Synchronize radial-table copies and CPU aliases.
     void sync_vnl_table();
 
-    /**
-     * @brief Compute interpolation table qrad
-     *
-     * Compute interpolation table qrad(i,nm,l,nt) = Q^{(L)}_{nm,nt}(q_i)
-     * of angular momentum L, for atom of type nt, on grid q_i, where
-     * nm = combined index for n,m=1,nh(nt)
-     *
-     * @param cell UnitCell
-     */
+    //! Compute USPP radial transforms in qrad with normalization 4*pi/volume.
     void compute_qrad(UnitCell &cell);
 
     /**
-     * @brief computes the integral of the effective potential with the Q function
-     *
-     * @param veff effective potential
-     * @param rho_basis potential FFT grids
-     * @param cell UnitCell
+     * @brief Store integrals of the effective potential against USPP augmentation functions in deeq.
+     * @param[in] veff Effective potential in Ry (spin component, local grid point).
+     * @param[in] rho_basis Density basis and FFT grids.
+     * @param[in] cell Atomic geometry and pseudopotentials.
      */
     void newq(const ModuleBase::matrix &veff, const ModulePW::PW_Basis *rho_basis, UnitCell &cell);
 
-    /**
-     * @brief calculate D functions in the soc case when tvanp is true
-     *
-     * @param iat the index of atom
-     * @param cell UnitCell
-     */
+    //! Assemble SOC D coefficients for atom iat from bare terms and spin-rotated USPP integrals.
     void newd_so(const int &iat, UnitCell &cell);
 
-    /**
-     * @brief calculate D functions in the noncolin case when tvanp is true
-     *
-     * @param iat the index of atom
-     * @param cell UnitCell
-     */
+    //! Assemble spinor D coefficients for atom iat from bare terms and scalar and magnetic USPP integrals.
     void newd_nc(const int &iat, UnitCell &cell);
 };
 
-#endif // VNL_IN_PW
+#endif // VNL_IN_PW_H

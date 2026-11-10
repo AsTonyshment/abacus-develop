@@ -264,7 +264,9 @@ void Forces<FPTYPE, Device>::cal_force(
             ModuleIO::print_force(running, ucell, "ONSITE_PROJ    FORCE (eV/Angstrom)", forceonsite, false);
         }
     }
-    ModuleIO::print_force(running, ucell, "TOTAL-FORCE (eV/Angstrom)", force, false);
+    // The RT-TDDFT solver adds the nuclear velocity derivative before printing its complete force.
+    const std::string force_label = esolver_type == "tddft" ? "POSITION + FIELD FORCE (eV/Angstrom)" : "TOTAL-FORCE (eV/Angstrom)";
+    ModuleIO::print_force(running, ucell, force_label, force, false);
     ModuleBase::timer::end("Forces", "cal_force");
     return;
 }

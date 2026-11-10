@@ -5,14 +5,22 @@
 
 namespace elecstate
 {
+//! Sum eigenvalues weighted by occupations and k-point weights into the band energy across all partitions.
 void calEBand(const ModuleBase::matrix &ekb, const ModuleBase::matrix &wg, fenergy &f_en);
-/** @brief RT-TDDFT accepted-state material energy in Ry; scalar field energies and Hamilton energy are returned separately. */
-double cal_td_energy(
-    const ElecState &state,
-    double &electronic_field,
-    double &ionic_field,
-    double &hamilton);
 
+//! Combine RT-TDDFT endpoint KS and scalar-field energies with ionic terms in Ry (retaining the smearing contribution).
+double cal_td_energy(
+    const double &etot,
+    const UnitCell &cell,
+    const ModuleBase::matrix &pi,
+    const double &elec_field,
+    const double &ion_field,
+    double *total,
+    double *total_field,
+    double *kinetic,
+    double *vel_corr);
+
+//! Update occupation weights, Fermi levels and the smearing energy contribution unless fixed weights are supplied.
 void calculate_weights(
     const ModuleBase::matrix &ekb,
     ModuleBase::matrix &wg,
@@ -23,6 +31,7 @@ void calculate_weights(
     const int global_nbands,
     const bool skip_weights);
 
+//! Validate user-supplied occupations, assign them to local k-points and bands, and disable weight recalculation.
 void fixed_weights(
     const std::vector<double> &ocp_kb,
     const int &nbands,

@@ -24,7 +24,7 @@
  * - stage double/float data to device memory when GPU is enabled
  */
 
-void pseudopot_cell_vnl::init_vnl(UnitCell& cell, const ModulePW::PW_Basis* rho_basis)
+void pseudopot_cell_vnl::init_vnl(UnitCell &cell, const ModulePW::PW_Basis *rho_basis)
 {
     ModuleBase::TITLE("pseudopot_cell_vnl", "init_vnl");
     ModuleBase::timer::start("ppcell_vnl", "init_vnl");
@@ -92,27 +92,6 @@ void pseudopot_cell_vnl::init_vnl(UnitCell& cell, const ModulePW::PW_Basis* rho_
                 this->nhtoj(it, BetaIndex) = j;
                 this->indv(it, BetaIndex) = ib;
                 ++BetaIndex;
-            }
-        }
-
-        // ijtoh map augmentation channel indexes ih and jh to composite
-        // "triangular" index ijh
-        for (int ih1 = 0; ih1 < nhm; ih1++)
-        {
-            for (int ih2 = ih1; ih2 < nhm; ih2++)
-            {
-                this->ijtoh(it, ih1, ih2) = -1;
-                this->ijtoh(it, ih2, ih1) = -1;
-            }
-        }
-        int ijv = 0;
-        for (int ih1 = 0; ih1 < Nprojectors; ih1++)
-        {
-            for (int ih2 = ih1; ih2 < Nprojectors; ih2++)
-            {
-                ijv++; // liuyu I'm not sure from 0 or 1
-                this->ijtoh(it, ih1, ih2) = ijv;
-                this->ijtoh(it, ih2, ih1) = ijv;
             }
         }
 
@@ -234,7 +213,7 @@ void pseudopot_cell_vnl::init_vnl(UnitCell& cell, const ModulePW::PW_Basis* rho_
         ModuleBase::YlmReal::Ylm_Real(lmaxq * lmaxq, 1, &(rho_basis->gcar[rho_basis->ig_gge0]), ylmk0);
         for (int it = 0; it < cell.ntype; it++)
         {
-            Atom_pseudo* upf = &cell.atoms[it].ncpp;
+            Atom_pseudo *upf = &cell.atoms[it].ncpp;
             if (upf->tvanp)
             {
                 if (upf->has_so)
@@ -256,8 +235,8 @@ void pseudopot_cell_vnl::init_vnl(UnitCell& cell, const ModulePW::PW_Basis* rho_
                                         {
                                             for (int is = 0; is < 2; is++)
                                             {
-                                                this->qq_so(it, ijs, kh, lh) += cell.omega * qgm.real() * soc.fcoef(it, is1, is, kh, ih)
-                                                                                * soc.fcoef(it, is, is2, jh, lh);
+                                                this->qq_so(it, ijs, kh, lh) += cell.omega * qgm.real() * soc.fcoef(it, is1, is, kh, ih) *
+                                                                                soc.fcoef(it, is, is2, jh, lh);
                                             }
                                         }
                                     }
@@ -293,20 +272,6 @@ void pseudopot_cell_vnl::init_vnl(UnitCell& cell, const ModulePW::PW_Basis* rho_
     Parallel_Reduce::reduce_pool(this->qq_nt.ptr, this->qq_nt.getSize());
     Parallel_Reduce::reduce_pool(this->qq_so.ptr, this->qq_so.getSize());
 #endif
-
-    // set the atomic specific qq_at matrices
-    for (int ia = 0; ia < cell.nat; ia++)
-    {
-        int it = cell.iat2it[ia];
-        for (int ih = 0; ih < nhm; ih++)
-        {
-            for (int jh = ih; jh < nhm; jh++)
-            {
-                this->qq_at(ia, ih, jh) = qq_nt(it, ih, jh);
-                this->qq_at(ia, jh, ih) = qq_nt(it, jh, ih);
-            }
-        }
-    }
 
     // h) It fills the interpolation table for the beta functions
     /**********************************************************

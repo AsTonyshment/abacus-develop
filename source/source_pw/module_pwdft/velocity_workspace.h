@@ -17,6 +17,7 @@ class VelocityWorkspace
 
   public:
     /** @brief Share beta and momentum-gradient overlaps between electronic velocity and RT-TDDFT nuclear energy derivatives. */
+    // nderiv counts blocks after beta, including the additional Hessian blocks required by RT-TDDFT force sampling.
     Complex *project(
         const Complex *beta,
         const Complex *grad,
@@ -25,16 +26,18 @@ class VelocityWorkspace
         int ld,
         int nkb,
         int cols,
+        int nderiv,
         int ncomp);
 
-    /** @brief Reduce four overlap blocks and contract the first ncomp blocks with D; bands counts spin-component columns. */
-    // ncomp=4 serves the general velocity operator; ncomp=1 supplies D<beta|psi> for the RT-TDDFT nuclear derivative.
+    /** @brief Reduce the requested overlap blocks and contract the first ncomp blocks with D; bands counts spin-component columns. */
+    // ncomp=4 serves velocity and RT-TDDFT inertia, ncomp=1 serves Pi sampling, and ncomp=0 performs overlap reduction only.
     void contract(
         const UnitCell &cell,
         const pseudopot_cell_vnl &pp,
         const int spin,
         const int bands,
         const int npol,
+        const int nderiv,
         const int ncomp,
         const Real scale,
         const ModulePW::PW_Basis_K &basis,

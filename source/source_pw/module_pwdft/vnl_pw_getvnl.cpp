@@ -42,7 +42,7 @@ void pseudopot_cell_vnl::getvnl(
     Device *ctx,
     const UnitCell &ucell,
     const int &ik,
-    const ModuleBase::Vector3<double> &vector_potential,
+    const ModuleBase::Vector3<double> &vecpot,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
     std::complex<FPTYPE> *vkb_in,
     const int lead_dim) const
@@ -65,9 +65,16 @@ void pseudopot_cell_vnl::getvnl(
 
     FPTYPE *shifted_gk_data = nullptr;
     FPTYPE *tab_ptr = this->get_tab_data<FPTYPE>();
+    if (this->mom_ver_[precision] != this->table_version_)
+    {
+        FPTYPE *mom = reserve_vnl_buffer<FPTYPE, Device>(this->vnl_mom_[precision], this->rad_mom.getSize());
+        castmem_var_h2d_op()(mom, this->rad_mom.ptr, this->rad_mom.getSize());
+        this->mom_ver_[precision] = this->table_version_;
+    }
+    const FPTYPE *moments = this->vnl_mom_[precision].template data<FPTYPE>();
     const std::int64_t momentum_elements = static_cast<std::int64_t>(npw) * 3;
 
-    const ModuleBase::Vector3<double> reduced_vector_potential = vector_potential / ucell.tpiba;
+    const ModuleBase::Vector3<double> reduced_vecpot = vecpot / ucell.tpiba;
     this->vnl_host_momentum_.resize(npw);
     std::vector<ModuleBase::Vector3<double>> &shifted_gk = this->vnl_host_momentum_;
 #ifdef _OPENMP
@@ -75,7 +82,7 @@ void pseudopot_cell_vnl::getvnl(
 #endif
     for (int ig = 0; ig < npw; ++ig)
     {
-        shifted_gk[ig] = this->wfcpw->getgpluskcar(ik, ig) + reduced_vector_potential;
+        shifted_gk[ig] = this->wfcpw->getgpluskcar(ik, ig) + reduced_vecpot;
     }
 
     double vmax = 0.0;
@@ -147,7 +154,7 @@ void pseudopot_cell_vnl::getvnl(
         FPTYPE *vel = reserve_vnl_buffer<FPTYPE, Device>(this->vnl_vel_[precision], size);
         base_device::memory::cast_memory_op<FPTYPE, double, Device, base_device::DEVICE_CPU>()(
             vel, reinterpret_cast<const double *>(ion_vel.data()), size);
-        hamilt::proj_eval_op<FPTYPE, Device>()(
+        hamilt::proj_eval_op<FPTYPE, Device, 0>()(
             npw,
             lead_dim,
             this->nkb,
@@ -160,6 +167,8 @@ void pseudopot_cell_vnl::getvnl(
             vel,
             tab_ptr,
             nullptr,
+            nullptr,
+            moments,
             structure_factor,
             vkb_in);
         // The atom-resolved evaluator has filled vkb_in, completing the moving-projector calculation.
@@ -220,6 +229,7 @@ void pseudopot_cell_vnl::getvnl(
         nhtol_ptr,
         nhtolm_ptr,
         tab_ptr,
+        moments,
         vkb_radial,
         structure_factor,
         vkb_in);

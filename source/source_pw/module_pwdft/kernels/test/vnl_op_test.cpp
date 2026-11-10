@@ -4030,6 +4030,7 @@ TEST_F(TestSrcPWVnlMultiDevice, cal_vnl_op_cpu)
                                                           nhtol.data(),
                                                           nhtolm.data(),
                                                           tab.data(),
+                                                          nullptr,
                                                           vkb1.data(),
                                                           sk.data(),
                                                           vkb.data());
@@ -4097,6 +4098,7 @@ TEST_F(TestSrcPWVnlMultiDevice, cal_vnl_op_gpu)
                                                           d_nhtol,
                                                           d_nhtolm,
                                                           d_tab,
+                                                          nullptr,
                                                           d_vkb1,
                                                           d_sk,
                                                           d_vkb);

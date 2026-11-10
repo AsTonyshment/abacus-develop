@@ -29,6 +29,7 @@ void ProjectorGradient<Real, Device>::calculate(
     const int ik,
     const ModuleBase::Vector3<double> &A,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+    int order,
     Complex *output)
 {
     ModuleBase::timer::start("ProjectorGradient", "calculate");
@@ -43,6 +44,9 @@ void ProjectorGradient<Real, Device>::calculate(
     {
         reserve<Real>(&radial_, pp->tab.getSize());
         reserve<Real>(&derivative_, pp->tab_dq.getSize());
+        reserve<Real>(&moments_, pp->rad_mom.getSize());
+        base_device::memory::cast_memory_op<Real, double, Device, base_device::DEVICE_CPU>()(
+            moments_.template data<Real>(), pp->rad_mom.ptr, pp->rad_mom.getSize());
         base_device::memory::cast_memory_op<Real, double, Device, base_device::DEVICE_CPU>()(
             radial_.template data<Real>(), pp->tab.ptr, pp->tab.getSize());
         base_device::memory::cast_memory_op<Real, double, Device, base_device::DEVICE_CPU>()(
@@ -67,6 +71,21 @@ void ProjectorGradient<Real, Device>::calculate(
         base_device::memory::synchronize_memory_op<int, Device, base_device::DEVICE_CPU>()(
             metadata_.template data<int>(), host_metadata_.data(), host_metadata_.size());
         version_ = pp->table_version();
+    }
+    // Second derivatives are needed only by RT-TDDFT nuclear inertia, so ordinary velocity calls keep first-order storage.
+    const Real *second = nullptr;
+    const Real *moments = moments_.template data<Real>();
+    if (order == 2)
+    {
+        pp->ensure_hess(cell);
+        if (hess_ver_ != pp->table_version())
+        {
+            reserve<Real>(&second_, pp->tab_d2.getSize());
+            base_device::memory::cast_memory_op<Real, double, Device, base_device::DEVICE_CPU>()(
+                second_.template data<Real>(), pp->tab_d2.ptr, pp->tab_d2.getSize());
+            hess_ver_ = pp->table_version();
+        }
+        second = second_.template data<Real>();
     }
     const int npw = basis.npwk[ik];
     if (npw == 0)
@@ -110,21 +129,54 @@ void ProjectorGradient<Real, Device>::calculate(
         momentum_.template data<Real>(), host_q_.data(), momentum_elements);
     Device *ctx = nullptr;
     pp->psf->get_sk(ctx, ik, &basis, structure_.template data<Complex>());
-    proj_eval_op<Real, Device>()(
-        npw,
-        basis.npwk_max,
-        pp->nkb,
-        pp->tab.getBound2(),
-        pp->tab.getBound3(),
-        static_cast<Real>(dq),
-        static_cast<Real>(cell.tpiba),
-        metadata_.template data<int>(),
-        momentum_.template data<Real>(),
-        vel,
-        radial_.template data<Real>(),
-        derivative_.template data<Real>(),
-        structure_.template data<Complex>(),
-        output);
+    // Select a compiled derivative order before launching the shared CPU/GPU evaluator.
+    const Real grid_dq = static_cast<Real>(dq);
+    const Real tpiba = static_cast<Real>(cell.tpiba);
+    const int *meta = metadata_.template data<int>();
+    const Real *q = momentum_.template data<Real>();
+    const Real *radial = radial_.template data<Real>();
+    const Real *first = derivative_.template data<Real>();
+    const Complex *sk = structure_.template data<Complex>();
+    if (order == 1)
+    {
+        proj_eval_op<Real, Device, 1>()(
+            npw,
+            basis.npwk_max,
+            pp->nkb,
+            pp->tab.getBound2(),
+            pp->tab.getBound3(),
+            grid_dq,
+            tpiba,
+            meta,
+            q,
+            vel,
+            radial,
+            first,
+            second,
+            moments,
+            sk,
+            output);
+    }
+    else
+    {
+        proj_eval_op<Real, Device, 2>()(
+            npw,
+            basis.npwk_max,
+            pp->nkb,
+            pp->tab.getBound2(),
+            pp->tab.getBound3(),
+            grid_dq,
+            tpiba,
+            meta,
+            q,
+            vel,
+            radial,
+            first,
+            second,
+            moments,
+            sk,
+            output);
+    }
     ModuleBase::timer::end("ProjectorGradient", "calculate");
 }
 template class ProjectorGradient<float, base_device::DEVICE_CPU>;

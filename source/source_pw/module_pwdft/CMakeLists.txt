@@ -62,7 +62,6 @@ list(
   stress_pw.cpp
   vl_pw.cpp
   vnl_pw.cpp
-  vnl_pw_alpha.cpp
   vnl_pw_deeq.cpp
   vnl_pw_getvnl.cpp
   vnl_pw_grad.cpp

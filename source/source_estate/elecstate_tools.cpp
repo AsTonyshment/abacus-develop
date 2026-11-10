@@ -1,15 +1,17 @@
 #include "elecstate_tools.h"
 
 #include "occupy.h"
+#include "source_base/constants.h"
 #include "source_base/module_parallel/para_band_output.h"
 #include "source_base/module_parallel/para_bridge.h"
 #include "source_base/parallel_reduce.h"
+#include "source_base/timer.h"
 
 #include <vector>
 
 namespace elecstate
 {
-void calEBand(const ModuleBase::matrix& ekb, const ModuleBase::matrix& wg, fenergy& f_en)
+void calEBand(const ModuleBase::matrix &ekb, const ModuleBase::matrix &wg, fenergy &f_en)
 {
     ModuleBase::TITLE("ElecState", "calEBand");
     // Each rank accumulates the contribution from its local k-points and bands.
@@ -34,19 +36,67 @@ void calEBand(const ModuleBase::matrix& ekb, const ModuleBase::matrix& wg, fener
     return;
 }
 
-void calculate_weights(const ModuleBase::matrix& ekb,
-                       ModuleBase::matrix& wg,
-                       const K_Vectors* klist,
-                       Efermi& eferm,
-                       fenergy& f_en,
-                       std::vector<double>& nelec_spin,
-                       const int global_nbands,
-                       const bool skip_weights)
+double cal_td_energy(
+    const double &etot,
+    const UnitCell &cell,
+    const ModuleBase::matrix &pi,
+    const double &elec_field,
+    const double &ion_field,
+    double *total,
+    double *total_field,
+    double *kinetic,
+    double *vel_corr)
+{
+    ModuleBase::timer::start("ElecState", "cal_td_energy");
+
+    *kinetic = 0.0;
+    *vel_corr = 0.0;
+    int atom = 0;
+
+    for (int it = 0; it < cell.ntype; ++it)
+    {
+        const double mass = cell.atoms[it].mass / ModuleBase::AU_to_MASS;
+        for (int ia = 0; ia < cell.atoms[it].na; ++ia, ++atom)
+        {
+            const ModuleBase::Vector3<double> &vel = cell.atoms[it].vel[ia];
+            // RT-TDDFT velocities and Pi use Hartree units, while the existing energy interface uses Ry.
+            *kinetic += mass * vel.norm2();
+            // The RT-TDDFT energy correction from traveling pseudopotentials is -sum_I v_I.Pi_I.
+            for (int d = 0; d < 3; ++d)
+            {
+                *vel_corr -= 2.0 * vel[d] * pi(atom, d);
+            }
+        }
+    }
+
+    // Retain the fixed-occupation smearing contribution in all RT-TDDFT energy outputs.
+    const double md_energy = etot - elec_field + *vel_corr;
+    // The endpoint total includes ionic kinetic energy, which MD adds separately to the returned potential.
+    *total = md_energy + *kinetic;
+    // Restore both scalar external-field couplings to obtain the field-inclusive endpoint total.
+    *total_field = *total + elec_field + ion_field;
+
+    ModuleBase::timer::end("ElecState", "cal_td_energy");
+
+    return md_energy;
+}
+
+void calculate_weights(
+    const ModuleBase::matrix &ekb,
+    ModuleBase::matrix &wg,
+    const K_Vectors *klist,
+    Efermi &eferm,
+    fenergy &f_en,
+    std::vector<double> &nelec_spin,
+    const int global_nbands,
+    const bool skip_weights)
 {
     ModuleBase::TITLE("ElecState", "calculate_weights");
     // Preserve occupations supplied through ocp_set instead of recomputing them.
     if (skip_weights == true)
+    {
         return;
+    }
 
     const int nbands = ekb.nc;
     const int nks = ekb.nr;
@@ -59,18 +109,15 @@ void calculate_weights(const ModuleBase::matrix& ekb,
         const int band_offset = band_output.local_offset();
         if (PARAM.globalv.two_fermi)
         {
-            Occupy::iweights(nks, klist->wk, nbands, band_offset, nelec_spin[0], ekb, eferm.ef_up, wg, 0, klist->isk,
-                             PARAM.inp.nspin);
-            Occupy::iweights(nks, klist->wk, nbands, band_offset, nelec_spin[1], ekb, eferm.ef_dw, wg, 1, klist->isk,
-                             PARAM.inp.nspin);
+            Occupy::iweights(nks, klist->wk, nbands, band_offset, nelec_spin[0], ekb, eferm.ef_up, wg, 0, klist->isk, PARAM.inp.nspin);
+            Occupy::iweights(nks, klist->wk, nbands, band_offset, nelec_spin[1], ekb, eferm.ef_dw, wg, 1, klist->isk, PARAM.inp.nspin);
             // ef = ( ef_up + ef_dw ) / 2.0_dp need??? mohan add 2012-04-16
             // Keep independent Fermi levels for the two spin channels.
         }
         else
         {
             // A spin selector of -1 requests the combined-spin occupation path.
-            Occupy::iweights(nks, klist->wk, nbands, band_offset, PARAM.inp.nelec, ekb, eferm.ef, wg, -1, klist->isk,
-                             PARAM.inp.nspin);
+            Occupy::iweights(nks, klist->wk, nbands, band_offset, PARAM.inp.nelec, ekb, eferm.ef, wg, -1, klist->isk, PARAM.inp.nspin);
         }
     }
     else if (Occupy::use_gaussian_broadening)
@@ -79,47 +126,50 @@ void calculate_weights(const ModuleBase::matrix& ekb,
         {
             double demet_up = 0.0;
             double demet_dw = 0.0;
-            Occupy::gweights(nks,
-                             klist->wk,
-                             nbands,
-                             nelec_spin[0],
-                             Occupy::gaussian_parameter,
-                             Occupy::gaussian_type,
-                             ekb,
-                             eferm.ef_up,
-                             demet_up,
-                             wg,
-                             0,
-                             klist->isk);
-            Occupy::gweights(nks,
-                             klist->wk,
-                             nbands,
-                             nelec_spin[1],
-                             Occupy::gaussian_parameter,
-                             Occupy::gaussian_type,
-                             ekb,
-                             eferm.ef_dw,
-                             demet_dw,
-                             wg,
-                             1,
-                             klist->isk);
+            Occupy::gweights(
+                nks,
+                klist->wk,
+                nbands,
+                nelec_spin[0],
+                Occupy::gaussian_parameter,
+                Occupy::gaussian_type,
+                ekb,
+                eferm.ef_up,
+                demet_up,
+                wg,
+                0,
+                klist->isk);
+            Occupy::gweights(
+                nks,
+                klist->wk,
+                nbands,
+                nelec_spin[1],
+                Occupy::gaussian_parameter,
+                Occupy::gaussian_type,
+                ekb,
+                eferm.ef_dw,
+                demet_dw,
+                wg,
+                1,
+                klist->isk);
             f_en.demet = demet_up + demet_dw;
         }
         else
         {
             // A spin selector of -1 requests the combined-spin occupation path.
-            Occupy::gweights(nks,
-                             klist->wk,
-                             nbands,
-                             PARAM.inp.nelec,
-                             Occupy::gaussian_parameter,
-                             Occupy::gaussian_type,
-                             ekb,
-                             eferm.ef,
-                             f_en.demet,
-                             wg,
-                             -1,
-                             klist->isk);
+            Occupy::gweights(
+                nks,
+                klist->wk,
+                nbands,
+                PARAM.inp.nelec,
+                Occupy::gaussian_parameter,
+                Occupy::gaussian_type,
+                ekb,
+                eferm.ef,
+                f_en.demet,
+                wg,
+                -1,
+                klist->isk);
         }
 #ifdef __MPI
         // demet is accumulated independently on every k-point and band partition.
@@ -135,12 +185,13 @@ void calculate_weights(const ModuleBase::matrix& ekb,
     return;
 }
 
-void fixed_weights(const std::vector<double>& ocp_kb,
-                   const int& nbands,
-                   const double& nelec,
-                   const K_Vectors* klist,
-                   ModuleBase::matrix& wg,
-                   bool& skip_weights)
+void fixed_weights(
+    const std::vector<double> &ocp_kb,
+    const int &nbands,
+    const double &nelec,
+    const K_Vectors *klist,
+    ModuleBase::matrix &wg,
+    bool &skip_weights)
 {
     assert(nbands > 0);
     assert(nelec > 0.0);
@@ -184,8 +235,8 @@ void fixed_weights(const std::vector<double>& ocp_kb,
         {
             // Taoni fix ocp_set under kpar and bndpar on 2026-08-21
             const int global_band = band_offset + ib;
-            const std::size_t occupation_index
-                = static_cast<std::size_t>(global_k) * static_cast<std::size_t>(nbands) + static_cast<std::size_t>(global_band);
+            const std::size_t occupation_index =
+                static_cast<std::size_t>(global_k) * static_cast<std::size_t>(nbands) + static_cast<std::size_t>(global_band);
             wg(ik, ib) = ocp_kb[occupation_index];
         }
     }

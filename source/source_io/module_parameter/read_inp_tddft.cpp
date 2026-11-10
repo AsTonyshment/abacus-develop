@@ -176,14 +176,20 @@ void ReadInput::item_rt_tddft()
 
 The file `OUT.{suffix}/td_energy.txt` records the electronic step, time in fs, and the following energies in Rydberg:
 
-* Material energy: $E_{\mathrm{mat}}=F-E_{\mathrm{sm}}-E_{\mathrm{e,field}}$.
-* Hamilton energy: $\mathcal{H}=F-E_{\mathrm{sm}}+E_{\mathrm{ion,field}}$.
-* Electronic scalar-field energy: $E_{\mathrm{e,field}}=\int_\Omega\rho(\boldsymbol{r},t)V_{\mathrm{ext}}(\boldsymbol{r},t)\,\mathrm{d}\boldsymbol{r}$.
-* Ionic scalar-field energy: $E_{\mathrm{ion,field}}=-\sum_I Z_I V_{\mathrm{ext}}(\boldsymbol{R}_I,t)$.
+* `potential`: Energy supplied to MD before adding ionic kinetic energy, $E_{\mathrm{potential}}=F-E_{\mathrm{e,field}}+E_{\mathrm{vel}}$.
+* `total`: Total energy excluding scalar external-field coupling, $E_{\mathrm{total}}=E_{\mathrm{potential}}+K_{\mathrm{ion}}$.
+* `total_field`: Total energy including scalar external-field coupling, $E_{\mathrm{total,field}}=E_{\mathrm{total}}+E_{\mathrm{e,field}}+E_{\mathrm{ion,field}}$.
+* `ionic_kinetic`: Ionic kinetic energy, $K_{\mathrm{ion}}=\frac12\sum_I M_I|\boldsymbol{v}_I|^2$.
+* `velocity_corr`: Energy correction from traveling pseudopotentials, $E_{\mathrm{vel}}=-\sum_I\boldsymbol{v}_I\cdot\boldsymbol{\Pi}_I$.
+* `smearing`: Signed smearing contribution, $E_{\mathrm{sm}}$, already included in `potential`, `total`, and `total_field`.
+* `electronic_field`: Electronic scalar-field energy, $E_{\mathrm{e,field}}=\int_\Omega\rho(\boldsymbol{r},t)V_{\mathrm{ext}}(\boldsymbol{r},t)\,\mathrm{d}\boldsymbol{r}$.
+* `ionic_field`: Ionic scalar-field energy, $E_{\mathrm{ion,field}}=-\sum_I Z_I V_{\mathrm{ext}}(\boldsymbol{R}_I,t)$.
 
-Here $F$ is the generalized Kohn-Sham free-energy functional including the electronic scalar-field energy and the smearing entropy term $E_{\mathrm{sm}}$. The electron number density is $\rho$, $Z_I$ is the ionic valence charge, and $\boldsymbol{R}_I$ is the ionic position. $V_{\mathrm{ext}}$ is the external scalar potential energy of an electron; for a uniform electric field in the length gauge, $V_{\mathrm{ext}}(\boldsymbol{r},t)=e\boldsymbol{E}(t)\cdot\boldsymbol{r}$, where $e$ is the positive elementary charge.
+The energies use the generalized Kohn-Sham free-energy functional $F$, including its smearing contribution. Here $M_I$ and $\boldsymbol{v}_I$ are the ionic mass and velocity, and $\boldsymbol{\Pi}_I=\partial F/\partial\boldsymbol{v}_I$. With `td_nl_motion=false`, `velocity_corr` is zero.
 
-The scalar external-field coupling is $E_{\mathrm{field}}=E_{\mathrm{e,field}}+E_{\mathrm{ion,field}}$, giving $\mathcal{H}=E_{\mathrm{mat}}+E_{\mathrm{field}}$. In the velocity gauge, $V_{\mathrm{ext}}=0$ and both scalar-field energies vanish. The smearing entropy term is $E_{\mathrm{sm}}=-TS$, with $\sigma=k_{\mathrm{B}}T$, where $\sigma$ is the smearing width and $S$ is the entropy defined by the selected smearing method.
+For Fermi-Dirac smearing, $E_{\mathrm{sm}}=-T_{\mathrm{e}}S$ is the electronic entropy term; other smearing methods use their corresponding generalized entropy contribution.
+
+Here $\rho$, $Z_I$, and $\boldsymbol{R}_I$ denote the electron number density, ionic valence charge, and ionic position. The electron's external scalar potential energy is $V_{\mathrm{ext}}(\boldsymbol{r},t)=e\boldsymbol{E}(t)\cdot\boldsymbol{r}$ for a uniform field in the length gauge, where $e$ is the positive elementary charge. In the velocity gauge, $V_{\mathrm{ext}}=0$.
 
 [NOTE] Enabling this output adds density integration and diagnostic communication.)";
         item.default_value = "false";
@@ -527,9 +533,9 @@ For a nonorthogonal LCAO basis:
         item.annotation = "atomic velocity dependence of PW nonlocal pseudopotentials";
         item.category = "Real-Time TDDFT (PW)";
         item.type = "Boolean";
-        item.description = R"(Controls the nuclear velocity dependence of norm-conserving nonlocal pseudopotentials in PW RT-TDDFT.
+        item.description = R"(Controls traveling pseudopotentials, which introduce nuclear velocity dependence into norm-conserving nonlocal pseudopotentials in PW RT-TDDFT.
 
-* `True`: Include the nuclear velocity phase in electronic propagation and ionic position forces, and calculate the derivative of the electronic energy with respect to nuclear velocity. This derivative can be nonzero even at zero instantaneous nuclear velocity.
+* `True`: Include the nuclear velocity phase in electronic propagation, the nuclear velocity derivative force and effective inertia in instantaneous ionic acceleration, and the corresponding material-energy correction. The velocity derivative force can be nonzero even at zero instantaneous nuclear velocity.
 * `False`: Use position-dependent pseudopotentials without nuclear velocity dependence.
 
 This setting applies in both length and velocity gauges, as well as without an external field. In velocity gauge, `td_vg_nl` controls the electromagnetic coupling separately.

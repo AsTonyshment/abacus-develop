@@ -13,11 +13,14 @@ class ProjectorGradient
     using Complex = std::complex<Real>;
     ct::Tensor radial_;
     ct::Tensor derivative_;
+    ct::Tensor second_;
+    ct::Tensor moments_;
     ct::Tensor metadata_;
     ct::Tensor momentum_;
     ct::Tensor structure_;
     ct::Tensor vel_;
     size_t version_ = 0;
+    size_t hess_ver_ = 0;
     std::vector<Real> host_q_;
     std::vector<int> host_metadata_;
 
@@ -27,6 +30,7 @@ class ProjectorGradient
   public:
     /** @brief Evaluate momentum derivatives at G+k+A-v_I for the current operator.
      * @param ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units; non-RT callers pass an empty vector.
+     * @param order One returns x,y,z; two returns x,y,z,xx,xy,xz,yy,yz,zz for RT-TDDFT inertia.
      */
     void calculate(
         pseudopot_cell_vnl *pp,
@@ -35,6 +39,7 @@ class ProjectorGradient
         const int ik,
         const ModuleBase::Vector3<double> &A,
         const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+        int order,
         Complex *output);
 };
 } // namespace hamilt

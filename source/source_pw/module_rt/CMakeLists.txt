@@ -6,6 +6,7 @@ add_library(
   td_hamilt_pw.cpp
   td_ion_pw.cpp
   td_ion_pi_pw.cpp
+  td_ion_accel.cpp
   prop_cn_pw.cpp
   prop_etrs_pw.cpp
   td_history_pw.cpp

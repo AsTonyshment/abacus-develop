@@ -4,7 +4,7 @@
 #include <thrust/complex.h>
 namespace hamilt
 {
-template <typename Real>
+template <typename Real, int Order>
 __global__ void gradient_kernel(
     int npw,
     int ld,
@@ -18,17 +18,37 @@ __global__ void gradient_kernel(
     const Real *vel,
     const Real *tab,
     const Real *derivative,
+    const Real *second,
+    const Real *moments,
     const thrust::complex<Real> *sk,
     thrust::complex<Real> *out)
 {
     const int ig = blockIdx.x * blockDim.x + threadIdx.x;
     if (ig < npw)
     {
-        projector_elem(ig, static_cast<int>(blockIdx.y), npw, ld, nkb, nbeta, nq, dq, tpiba, metadata, q, vel, tab, derivative, sk, out);
+        projector_elem<Real, thrust::complex<Real>, Order>(
+            ig,
+            static_cast<int>(blockIdx.y),
+            npw,
+            ld,
+            nkb,
+            nbeta,
+            nq,
+            dq,
+            tpiba,
+            metadata,
+            q,
+            vel,
+            tab,
+            derivative,
+            second,
+            moments,
+            sk,
+            out);
     }
 }
-template <typename Real>
-void proj_eval_op<Real, base_device::DEVICE_GPU>::operator()(
+template <typename Real, int Order>
+void proj_eval_op<Real, base_device::DEVICE_GPU, Order>::operator()(
     int npw,
     int ld,
     int nkb,
@@ -41,6 +61,8 @@ void proj_eval_op<Real, base_device::DEVICE_GPU>::operator()(
     const Real *vel,
     const Real *tab,
     const Real *derivative,
+    const Real *second,
+    const Real *moments,
     const std::complex<Real> *sk,
     std::complex<Real> *out) const
 {
@@ -48,7 +70,8 @@ void proj_eval_op<Real, base_device::DEVICE_GPU>::operator()(
     {
         return;
     }
-    gradient_kernel<<<dim3((npw + 255) / 256, nkb), 256>>>(
+    // Compile ordinary projector calls independently of the RT-TDDFT Hessian workload.
+    gradient_kernel<Real, Order><<<dim3((npw + 255) / 256, nkb), 256>>>(
         npw,
         ld,
         nkb,
@@ -61,6 +84,8 @@ void proj_eval_op<Real, base_device::DEVICE_GPU>::operator()(
         vel,
         tab,
         derivative,
+        second,
+        moments,
         reinterpret_cast<const thrust::complex<Real> *>(sk),
         reinterpret_cast<thrust::complex<Real> *>(out));
     const cudaError_t error = cudaGetLastError();
@@ -69,6 +94,10 @@ void proj_eval_op<Real, base_device::DEVICE_GPU>::operator()(
         throw std::runtime_error(cudaGetErrorString(error));
     }
 }
-template class proj_eval_op<float, base_device::DEVICE_GPU>;
-template class proj_eval_op<double, base_device::DEVICE_GPU>;
+template class proj_eval_op<float, base_device::DEVICE_GPU, 0>;
+template class proj_eval_op<float, base_device::DEVICE_GPU, 1>;
+template class proj_eval_op<float, base_device::DEVICE_GPU, 2>;
+template class proj_eval_op<double, base_device::DEVICE_GPU, 0>;
+template class proj_eval_op<double, base_device::DEVICE_GPU, 1>;
+template class proj_eval_op<double, base_device::DEVICE_GPU, 2>;
 } // namespace hamilt

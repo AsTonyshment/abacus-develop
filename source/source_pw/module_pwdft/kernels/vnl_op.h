@@ -33,61 +33,66 @@ struct cal_vnl_op
     /// @param nhtol - pseudopot_cell_vnl::nhtol
     /// @param nhtolm - pseudopot_cell_vnl::nhtolm
     /// @param tab - pseudopot_cell_vnl::tab
+    /// @param moments - origin expansion coefficients, or nullptr for table-only evaluation
     /// @param vkb1 - intermedia matrix with size nkb * GlobalC::wf.npwx
     /// @param sk - results of cal_sk
     ///
     /// Output Parameters
     /// @param vkb_in - output results with size nkb * GlobalC::wf.npwx
-    void operator()(const Device* ctx,
-                    const int& ntype,
-                    const int& npw,
-                    const int& npwx,
-                    const int& nhm,
-                    const int& tab_2,
-                    const int& tab_3,
-                    const int* atom_na,
-                    const int* atom_nb,
-                    const int* atom_nh,
-                    const FPTYPE& DQ,
-                    const FPTYPE& tpiba,
-                    const std::complex<FPTYPE>& NEG_IMAG_UNIT,
-                    const FPTYPE* gk,
-                    const FPTYPE* ylm,
-                    const FPTYPE* indv,
-                    const FPTYPE* nhtol,
-                    const FPTYPE* nhtolm,
-                    const FPTYPE* tab,
-                    FPTYPE* vkb1,
-                    const std::complex<FPTYPE>* sk,
-                    std::complex<FPTYPE>* vkb_in);
+    void operator()(
+        const Device *ctx,
+        const int &ntype,
+        const int &npw,
+        const int &npwx,
+        const int &nhm,
+        const int &tab_2,
+        const int &tab_3,
+        const int *atom_na,
+        const int *atom_nb,
+        const int *atom_nh,
+        const FPTYPE &DQ,
+        const FPTYPE &tpiba,
+        const std::complex<FPTYPE> &NEG_IMAG_UNIT,
+        const FPTYPE *gk,
+        const FPTYPE *ylm,
+        const FPTYPE *indv,
+        const FPTYPE *nhtol,
+        const FPTYPE *nhtolm,
+        const FPTYPE *tab,
+        const FPTYPE *moments,
+        FPTYPE *vkb1,
+        const std::complex<FPTYPE> *sk,
+        std::complex<FPTYPE> *vkb_in);
 };
 
 #if __CUDA || __UT_USE_CUDA || __ROCM || __UT_USE_ROCM
 template <typename FPTYPE>
 struct cal_vnl_op<FPTYPE, base_device::DEVICE_GPU>
 {
-    void operator()(const base_device::DEVICE_GPU* ctx,
-                    const int& ntype,
-                    const int& npw,
-                    const int& npwx,
-                    const int& nhm,
-                    const int& tab_2,
-                    const int& tab_3,
-                    const int* atom_na,
-                    const int* atom_nb,
-                    const int* atom_nh,
-                    const FPTYPE& DQ,
-                    const FPTYPE& tpiba,
-                    const std::complex<FPTYPE>& NEG_IMAG_UNIT,
-                    const FPTYPE* gk,
-                    const FPTYPE* ylm,
-                    const FPTYPE* indv,
-                    const FPTYPE* nhtol,
-                    const FPTYPE* nhtolm,
-                    const FPTYPE* tab,
-                    FPTYPE* vkb1,
-                    const std::complex<FPTYPE>* sk,
-                    std::complex<FPTYPE>* vkb_in);
+    void operator()(
+        const base_device::DEVICE_GPU *ctx,
+        const int &ntype,
+        const int &npw,
+        const int &npwx,
+        const int &nhm,
+        const int &tab_2,
+        const int &tab_3,
+        const int *atom_na,
+        const int *atom_nb,
+        const int *atom_nh,
+        const FPTYPE &DQ,
+        const FPTYPE &tpiba,
+        const std::complex<FPTYPE> &NEG_IMAG_UNIT,
+        const FPTYPE *gk,
+        const FPTYPE *ylm,
+        const FPTYPE *indv,
+        const FPTYPE *nhtol,
+        const FPTYPE *nhtolm,
+        const FPTYPE *tab,
+        const FPTYPE *moments,
+        FPTYPE *vkb1,
+        const std::complex<FPTYPE> *sk,
+        std::complex<FPTYPE> *vkb_in);
 };
 #endif // __CUDA || __UT_USE_CUDA || __ROCM || __UT_USE_ROCM
 } // namespace hamilt

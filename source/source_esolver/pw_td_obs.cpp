@@ -17,23 +17,56 @@
 namespace ModuleESolver
 {
 template <typename T, typename Device>
-void ESolver_KS_PW_TDDFT<T, Device>::out_energy(int istep, int rank, const std::string &output_dir)
+void ESolver_KS_PW_TDDFT<T, Device>::out_energy(
+    const UnitCell &cell,
+    int istep,
+    int rank,
+    const std::string &output_dir)
 {
+    // Sample Pi before energy evaluation so the velocity correction uses the same accepted endpoint.
+    const psi::Psi<T, Device> &wave = *this->stp.template get_psi_t<T, Device>();
+    const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(cell, this->inp_->td_nl_motion);
+    ModuleBase::Vector3<double> nl_a{0.0, 0.0, 0.0};
+    if (this->field_->gauge() == 1 && this->inp_->td_vg_nl != 0)
+    {
+        nl_a = this->field_->A_right_ha();
+    }
+    if (this->inp_->vnl_in_h)
+    {
+        ion_pi_ = pi_calc_.cal_pi(cell, *this->pw_wfc, this->kv, &this->ppcell, wave, this->pelec->wg, nl_a, vel);
+    }
+    else
+    {
+        ion_pi_.create(cell.nat, 3);
+    }
+
     double elec_field = 0.0;
     double ionic_field = 0.0;
-    double hamilt_energy = 0.0;
-    // Keep the material energy returned to the driver consistent with the endpoint energy written to disk.
-    material_energy_ = elecstate::cal_td_energy(*this->pelec, elec_field, ionic_field, hamilt_energy);
+    double total_field = 0.0;
+    double total = 0.0;
+    double kinetic = 0.0;
+    double vel_corr = 0.0;
+
+    // Sample scalar-field energies at the accepted RT-TDDFT endpoint before combining its energy contributions.
+    this->pelec->pot->td_field_energy(*this->pelec->charge, elec_field, ionic_field);
+
+    // MD adds ionic kinetic energy to the same potential used by the RT-TDDFT endpoint totals.
+    md_energy_ = elecstate::cal_td_energy(
+        this->pelec->f_en.etot, cell, ion_pi_, elec_field, ionic_field, &total, &total_field, &kinetic, &vel_corr);
+
     const double dt = this->field_->dt_ha();
     ModuleIO::out_td_energy(
         output_dir,
         istep,
         dt,
-        material_energy_,
-        hamilt_energy,
+        total,
+        total_field,
         elec_field,
         ionic_field,
-        this->pelec->f_en.etot,
+        kinetic,
+        vel_corr,
+        md_energy_,
+        this->pelec->f_en.demet,
         this->inp_->td_out_stat,
         rank,
         &log_,
@@ -58,16 +91,6 @@ void ESolver_KS_PW_TDDFT<T, Device>::out_td(
         }
         // Evaluate observables with the accepted endpoint geometry, field and nuclear velocities.
         const std::vector<ModuleBase::Vector3<double>> ion_vel = pw::td_ion_vel(ucell, this->inp_->td_nl_motion);
-        // Sample the nuclear derivative of the propagated nonlocal energy independently of current-output switches.
-        if (this->inp_->vnl_in_h)
-        {
-            ion_pi_ = pi_calc_.cal_pi(ucell, *this->pw_wfc, this->kv, &this->ppcell, current, this->pelec->wg, nonlocal_a, ion_vel);
-        }
-        else
-        {
-            // A Hamiltonian without its nonlocal term has no nuclear velocity derivative.
-            ion_pi_.create(ucell.nat, 3);
-        }
         const pw::TDVelResultPW currents = vel_.calculate(current, *this->pelec, vecpot, nonlocal_a, ion_vel, current_req_);
 
         pw::TDSpinResultPW moments;
@@ -162,7 +185,11 @@ void ESolver_KS_PW_TDDFT<T, Device>::out_prop(const UnitCell &cell, int step, bo
 }
 
 template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>::out_prop(const UnitCell &, int, bool);
-template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>::out_energy(int, int, const std::string &);
+template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>::out_energy(
+    const UnitCell &,
+    int,
+    int,
+    const std::string &);
 template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>::out_td(
     const UnitCell &,
     int,
@@ -171,7 +198,11 @@ template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>:
 template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>::out_eij(int);
 template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>::print_step(int) const;
 template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_CPU>::out_prop(const UnitCell &, int, bool);
-template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_CPU>::out_energy(int, int, const std::string &);
+template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_CPU>::out_energy(
+    const UnitCell &,
+    int,
+    int,
+    const std::string &);
 template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_CPU>::out_td(
     const UnitCell &,
     int,
@@ -181,7 +212,11 @@ template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_CPU>
 template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_CPU>::print_step(int) const;
 #if defined(__CUDA) || defined(__ROCM)
 template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_GPU>::out_prop(const UnitCell &, int, bool);
-template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_GPU>::out_energy(int, int, const std::string &);
+template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_GPU>::out_energy(
+    const UnitCell &,
+    int,
+    int,
+    const std::string &);
 template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_GPU>::out_td(
     const UnitCell &,
     int,
@@ -190,7 +225,11 @@ template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_GPU>:
 template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_GPU>::out_eij(int);
 template void ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_GPU>::print_step(int) const;
 template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_GPU>::out_prop(const UnitCell &, int, bool);
-template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_GPU>::out_energy(int, int, const std::string &);
+template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_GPU>::out_energy(
+    const UnitCell &,
+    int,
+    int,
+    const std::string &);
 template void ESolver_KS_PW_TDDFT<std::complex<double>, base_device::DEVICE_GPU>::out_td(
     const UnitCell &,
     int,

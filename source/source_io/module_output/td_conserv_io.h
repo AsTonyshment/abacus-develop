@@ -8,15 +8,19 @@
 
 namespace ModuleIO
 {
-/** @brief Write accepted endpoint energies in Rydberg. */
+/** @brief Write accepted endpoint energies and their included smearing contribution in Rydberg. */
 void write_td_energy(
     const std::string &directory,
     int step,
     double dt_ha,
-    double material,
-    double hamilton,
-    double electronic_field,
-    double ionic_field,
+    double potential,
+    double total,
+    double total_field,
+    double kinetic,
+    double vel_corr,
+    double smearing,
+    double elec_field,
+    double ion_field,
     std::ostream &log);
 
 /** @brief Print endpoint conservation relative to the caller's initial counts. */

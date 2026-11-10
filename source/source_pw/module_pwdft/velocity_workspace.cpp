@@ -22,29 +22,30 @@ std::complex<Real> *VelocityWorkspace<Real, Device>::project(
     int ld,
     int nkb,
     int cols,
+    int nderiv,
     int ncomp)
 {
     using CtDevice = typename ct::PsiToContainer<Device>::type;
     const std::int64_t block = static_cast<std::int64_t>(nkb) * cols;
-    // RT-TDDFT nuclear derivatives need one D-contracted block, while the velocity operator needs four.
-    const std::int64_t capacity = std::max<std::int64_t>(1, (4 + ncomp) * block);
+    // Allocate only the requested derivative and D-contraction blocks for velocity and RT-TDDFT sampling.
+    const std::int64_t capacity = std::max<std::int64_t>(1, (1 + nderiv + ncomp) * block);
     if (coefficients_.NumElements() < capacity || coefficients_.data_type() != ct::DataTypeToEnum<Complex>::value ||
         coefficients_.device_type() != ct::DeviceTypeToEnum<CtDevice>::value)
     {
         coefficients_ = ct::Tensor(ct::DataTypeToEnum<Complex>::value, ct::DeviceTypeToEnum<CtDevice>::value, {capacity});
     }
-    // Store beta overlaps, three interleaved gradient overlaps, then space for up to four D-contracted blocks.
+    // Store beta overlaps, interleaved derivative overlaps, then space for up to four D-contracted blocks.
     Complex *buffer = coefficients_.template data<Complex>();
     if (npw == 0)
     {
         // Empty PW ranks still contribute zeros to the following collective projection reduction.
-        base_device::memory::set_memory_op<Complex, Device>()(buffer, 0, 4 * block);
+        base_device::memory::set_memory_op<Complex, Device>()(buffer, 0, (1 + nderiv) * block);
     }
     else
     {
         const Complex one(1, 0);
         const Complex zero(0, 0);
-        const int nkb3 = 3 * nkb;
+        const int nkb3 = nderiv * nkb;
         if (cols == 1)
         {
             ModuleBase::gemv_op<Complex, Device>()('C', npw, nkb, &one, beta, ld, psi, 1, &zero, buffer, 1);
@@ -66,6 +67,7 @@ void VelocityWorkspace<Real, Device>::contract(
     const int spin,
     const int bands,
     const int npol,
+    const int nderiv,
     const int ncomp,
     const Real scale,
     const ModulePW::PW_Basis_K &basis,
@@ -78,7 +80,7 @@ void VelocityWorkspace<Real, Device>::contract(
         ModuleBase::timer::end("VelocityWorkspace", "contract");
         return;
     }
-    const std::int64_t projection_elements = 4 * count;
+    const std::int64_t projection_elements = (1 + nderiv) * count;
     // Complete the distributed overlaps before multiplying by D so both observables use the same full projections.
 #ifdef __MPI
     if (basis.poolnproc > 1)
@@ -108,6 +110,12 @@ void VelocityWorkspace<Real, Device>::contract(
         }
     }
 #endif
+    // RT-TDDFT derivative-only projections and non-root sampling ranks require the collective reduction above without D contraction.
+    if (ncomp == 0)
+    {
+        ModuleBase::timer::end("VelocityWorkspace", "contract");
+        return;
+    }
     Complex *output = buffer + projection_elements;
     const std::int64_t out_size = ncomp * count;
     base_device::memory::set_memory_op<Complex, Device>()(output, 0, out_size);
@@ -116,7 +124,7 @@ void VelocityWorkspace<Real, Device>::contract(
         // The ordinary overlap is packed separately from the three interleaved gradient overlaps.
         int sum = 0;
         int atom = 0;
-        const int stride = component == 0 ? pp.nkb : 3 * pp.nkb;
+        const int stride = component == 0 ? pp.nkb : nderiv * pp.nkb;
         const std::int64_t gradient_offset = static_cast<std::int64_t>(component - 1) * pp.nkb;
         const Complex *input = component == 0 ? buffer : buffer + count + gradient_offset;
         Complex *component_output = output + component * count;
