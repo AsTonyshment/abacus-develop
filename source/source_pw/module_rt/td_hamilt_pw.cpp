@@ -1,5 +1,4 @@
 #include "source_pw/module_rt/td_hamilt_pw.h"
-#include "source_pw/module_rt/td_ion_pw.h"
 
 namespace pw
 {
@@ -7,16 +6,20 @@ template <typename T, typename Device>
 TDHamiltPW<T, Device>::TDHamiltPW(
     hamilt::HamiltPW<T, Device> *hamilt,
     const ModulePW::PW_Basis_K &basis,
-    TDIonPW *ions,
-    bool motion)
-    : hamilt_(*hamilt), op_(hamilt, &basis), ions_(*ions), motion_(motion)
+    const bool &motion)
+    : hamilt_(*hamilt), op_(hamilt, &basis), motion_(motion)
 {
 }
 template <typename T, typename Device>
 void TDHamiltPW<T, Device>::bind(const Real *veff, const ModuleBase::Vector3<double> &vecpot_ha, const unitcell::IonicState &state)
 {
-    // Bind geometry, atomic velocities, local potential and vector potential at the same operator time.
-    ions_.bind(state);
+    // Sampled projectors own their geometry while the shared cell stays at the right endpoint.
+    std::vector<ModuleBase::Vector3<double>> tau;
+    tau.reserve(state.atoms.size());
+    for (const unitcell::IonicAtom &atom : state.atoms)
+    {
+        tau.push_back(atom.frac * state.lattice);
+    }
     // Extract velocities from this propagation sample so the projector phase follows the sampled ionic path.
     std::vector<ModuleBase::Vector3<double>> vel;
     if (motion_)
@@ -27,12 +30,12 @@ void TDHamiltPW<T, Device>::bind(const Real *veff, const ModuleBase::Vector3<dou
             vel.push_back(atom.velocity);
         }
     }
-    hamilt_.bind_td_state(veff, vecpot_ha, vel);
+    hamilt_.bind_td_state(veff, vecpot_ha, vel, tau);
 }
 template <typename T, typename Device>
 void TDHamiltPW<T, Device>::update_k(int ik)
 {
-    // Reuse the PW operator's k-point update to rebuild projectors for the currently bound geometry and field.
+    // Select cached projectors and the current local potential for this k point.
     op_.update_k(ik);
 }
 template <typename T, typename Device>

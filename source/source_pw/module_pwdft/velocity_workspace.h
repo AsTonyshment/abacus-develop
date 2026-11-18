@@ -22,26 +22,28 @@ class VelocityWorkspace
         const Complex *beta,
         const Complex *grad,
         const Complex *psi,
-        int npw,
-        int ld,
-        int nkb,
-        int cols,
-        int nderiv,
-        int ncomp);
+        const int &npw,
+        const int &ld,
+        const int &nkb,
+        const int &cols,
+        const int &nderiv,
+        const int &ncomp,
+        const Complex *beta_proj);
 
     /** @brief Reduce the requested overlap blocks and contract the first ncomp blocks with D; bands counts spin-component columns. */
     // ncomp=4 serves velocity and RT-TDDFT inertia, ncomp=1 serves Pi sampling, and ncomp=0 performs overlap reduction only.
     void contract(
         const UnitCell &cell,
         const pseudopot_cell_vnl &pp,
-        const int spin,
-        const int bands,
-        const int npol,
-        const int nderiv,
-        const int ncomp,
-        const Real scale,
+        const int &spin,
+        const int &bands,
+        const int &npol,
+        const int &nderiv,
+        const int &ncomp,
+        const Real &scale,
         const ModulePW::PW_Basis_K &basis,
-        Complex *buffer);
+        Complex *buffer,
+        const bool &beta_reduced);
 };
 } // namespace hamilt
 #endif

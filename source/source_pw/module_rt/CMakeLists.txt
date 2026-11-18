@@ -12,6 +12,7 @@ add_library(
   td_history_pw.cpp
   td_conserv_pw.cpp
   td_endpoint_pw.cpp
+  td_end_sample.cpp
   td_pw.cpp
   td_vel_pw.cpp
   td_spin_pw.cpp

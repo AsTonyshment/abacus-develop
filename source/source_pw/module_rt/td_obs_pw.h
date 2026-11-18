@@ -11,6 +11,7 @@ struct CurrentRequest
 {
     bool charge_total = false;
     bool charge_per_k = false;
+    bool charge_ions = false; ///< Include ionic and electron-plus-ion currents at coupled endpoints.
     bool spin_current = false;
 };
 
@@ -18,6 +19,7 @@ struct CurrentRequest
 struct TDVelResultPW
 {
     std::array<double, 3> total{}; ///< Electron charge current per volume, in Hartree atomic units.
+    std::array<double, 3> ionic{}; ///< Ionic charge current per volume, in Hartree atomic units.
     std::vector<double> per_k;     ///< Same units, [global k including spin][Cartesian direction].
     std::array<double, 9> spin{};  ///< Spin angular momentum flux, [flow][spin], hbar/(Bohr^2*atomic time).
 };

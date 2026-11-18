@@ -76,6 +76,13 @@ class pseudopot_cell_vnl
         std::complex<FPTYPE> *vkb_in,
         int lead_dim) const;
 
+    /** @brief Build shifted projectors using explicit native-device atomic phases. */
+    template <typename FPTYPE, typename Device>
+    void build_vnl(Device *ctx, const UnitCell &cell, const int &ik,
+                   const ModuleBase::Vector3<double> &a,
+                   const std::vector<ModuleBase::Vector3<double>> &vel,
+                   const std::complex<FPTYPE> *sk, std::complex<FPTYPE> *beta, const int &ld) const;
+
     //! Rebuild the radial first-derivative table by Bessel quadrature.
     void initgradq_vnl(const UnitCell &cell);
     //! Return the radial-table revision.

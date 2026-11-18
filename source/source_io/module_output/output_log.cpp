@@ -226,14 +226,71 @@ void output_vacuum_level(const UnitCell* ucell,
     ofs_running << "The vacuum level is " << vacuum_level << " eV" << std::endl;
 }
 
-void print_force(std::ofstream& ofs_running,
-                 const UnitCell& cell,
-                 const std::string& name,
-                 const ModuleBase::matrix& force,
-                 bool ry)
+void out_force_pw(
+    std::ofstream *log,
+    const UnitCell &cell,
+    const PWForceResult &result,
+    const bool &details)
 {
-    // this is a magic number, mohan note 2025-06-22
-    const double output_acc = 1.0e-8;
+    // Report the net-force treatment already applied by the physical force evaluator.
+    if (!result.shifted)
+    {
+        *log << " Notice: Atomic forces are not adjusted to enforce zero net force for gate fields, electric fields, or RT-TDDFT!\n";
+    }
+
+    // Completed RT force results carry the position and direct field subtotal.
+    const bool rt_force = result.pos_field.nr > 0;
+
+    // Print each available contribution once in eV/Angstrom.
+    if (details)
+    {
+        print_force(*log, cell, "LOCAL    FORCE (eV/Angstrom)", result.local, false);
+        print_force(*log, cell, "NONLOCAL FORCE (eV/Angstrom)", result.nonlocal, false);
+        print_force(*log, cell, "NLCC     FORCE (eV/Angstrom)", result.core, false);
+        print_force(*log, cell, "ION      FORCE (eV/Angstrom)", result.ion, false);
+        print_force(*log, cell, "SCC      FORCE (eV/Angstrom)", result.scc, false);
+        if (rt_force)
+        {
+            print_force(*log, cell, "RT FIELD FORCE (eV/Angstrom)", result.field, false);
+        }
+
+        const ModuleBase::matrix *extra[] = {&result.vdw, &result.static_field, &result.gate, &result.solvent, &result.onsite, &result.pcc};
+        const char *labels[] = {
+            "VDW      FORCE (eV/Angstrom)",
+            "EFIELD   FORCE (eV/Angstrom)",
+            "GATEFIELD FORCE (eV/Angstrom)",
+            "IMP_SOL  FORCE (eV/Angstrom)",
+            "ONSITE_PROJ FORCE (eV/Angstrom)",
+            "PCC      FORCE (eV/Angstrom)"
+        };
+        for (int i = 0; i < 6; ++i)
+        {
+            if (extra[i]->nr > 0)
+            {
+                print_force(*log, cell, labels[i], *extra[i], false);
+            }
+        }
+    }
+
+    // Report RT force balances before the complete force shared with MD.
+    if (rt_force)
+    {
+        print_force(*log, cell, "POSITION+FIELD FORCE (eV/Angstrom)", result.pos_field, false);
+        print_force(*log, cell, "NUCLEAR VELOCITY FORCE (eV/Angstrom)", result.vel_force, false);
+        print_force(*log, cell, "CONSTRAINT REACTION (eV/Angstrom)", result.reaction, false);
+    }
+    print_force(*log, cell, "TOTAL-FORCE (eV/Angstrom)", result.total, false);
+}
+
+void print_force(
+    std::ofstream &ofs_running,
+    const UnitCell &cell,
+    const std::string &name,
+    const ModuleBase::matrix &force,
+    bool ry)
+{
+    // Apply the display cutoff in Ry/Bohr before converting to the requested output unit.
+    constexpr double output_acc = 1.0e-8;
     double fac = 1.0;
     if (!ry)
     {
@@ -244,50 +301,49 @@ void print_force(std::ofstream& ofs_running,
     std::vector<double> force_x;
     std::vector<double> force_y;
     std::vector<double> force_z;
-    std::string table;
-
-    ofs_running << "\n #" << name << "#" << std::endl;
+    atom_label.reserve(cell.nat);
+    force_x.reserve(cell.nat);
+    force_y.reserve(cell.nat);
+    force_z.reserve(cell.nat);
 
     std::vector<std::string> titles({"Atoms", "Force_x", "Force_y", "Force_z"});
     int iat = 0;
-    for (int it = 0; it < cell.ntype; it++)
+    for (int it = 0; it < cell.ntype; ++it)
     {
-        for (int ia = 0; ia < cell.atoms[it].na; ia++)
+        for (int ia = 0; ia < cell.atoms[it].na; ++ia)
         {
-            std::string atom_labels = cell.atoms[it].label + std::to_string(ia + 1);
-            double fx = std::abs(force(iat, 0)) > output_acc ? force(iat, 0) * fac : 0.0;
-            double fy = std::abs(force(iat, 1)) > output_acc ? force(iat, 1) * fac : 0.0;
-            double fz = std::abs(force(iat, 2)) > output_acc ? force(iat, 2) * fac : 0.0;
+            const std::string atom_labels = cell.atoms[it].label + std::to_string(ia + 1);
+            const double fx = std::abs(force(iat, 0)) > output_acc ? force(iat, 0) * fac : 0.0;
+            const double fy = std::abs(force(iat, 1)) > output_acc ? force(iat, 1) * fac : 0.0;
+            const double fz = std::abs(force(iat, 2)) > output_acc ? force(iat, 2) * fac : 0.0;
             atom_label.push_back(atom_labels);
             force_x.push_back(fx);
             force_y.push_back(fy);
             force_z.push_back(fz);
-            iat++;
+            ++iat;
         }
     }
-
-
-    FmtTable fmt(/*titles=*/titles, 
-                 /*nrows=*/atom_label.size(), 
-                 /*formats=*/{"%8s", "%20.10f", "%20.10f", "%20.10f"}, 
-                 /*indent*/1,
-                 {FmtTable::Align::RIGHT,FmtTable::Align::RIGHT});
-
-
+    FmtTable fmt(
+        /*titles=*/titles,
+        /*nrows=*/atom_label.size(),
+        /*formats=*/{"%8s", "%20.10f", "%20.10f", "%20.10f"},
+        /*indent*/ 1,
+        {FmtTable::Align::RIGHT, FmtTable::Align::RIGHT});
     fmt << atom_label << force_x << force_y << force_z;
-    table = fmt.str();
-    ofs_running << table; 
+    const std::string table = fmt.str();
+    const std::string heading = "\n #" + name + "#\n";
 
-    if (PARAM.inp.test_force) 
-    { 
-        std::cout << table;
+    // Running logs and stdout follow the process-wide output setup.
+    ofs_running << heading << table;
+    if (PARAM.inp.test_force)
+    {
+        std::cout << heading << table;
     }
 }
 
 void print_stress(const std::string& name, const ModuleBase::matrix& scs, 
   const bool screen, const bool ry, std::ofstream &ofs)
 {
-    const double output_acc = 1.0e-8;
     double unit_transform = 1;
     std::string title = name;
     std::string unit = "";

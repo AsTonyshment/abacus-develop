@@ -1,8 +1,9 @@
 #include "esolver_ks_pw.h"
+#include "source_io/module_output/output_log.h"
+#include "source_pw/module_pwdft/force_result.h"
 #include "source_pw/module_pwdft/pw_hybrid_nscf.h"
 
 #include "source_estate/elecstate_pw.h"
-#include "source_estate/module_pot/td_field_manager.h"
 #include "source_estate/module_charge/chg_symm.h"
 #include "source_hamilt/hamilt_hs_adapter.h"
 #include "source_hsolver/diago_iter_assist.h"
@@ -10,7 +11,6 @@
 #include "source_hsolver/hsolver_pw.h"
 #include "source_io/module_parameter/parameter.h"
 #include "source_pw/module_pwdft/force_pw.h"
-#include "source_pw/module_rt/td_pw.h"
 #include "source_pw/module_pwdft/hamilt_pw.h"
 #include "source_pw/module_pwdft/stress_pw.h"
 
@@ -488,30 +488,32 @@ template <typename T, typename Device>
 void ESolver_KS_PW<T, Device>::cal_force(BaseCell &basecell, ModuleBase::matrix &force)
 {
     basecell.require_kind(BaseCell::Kind::unitcell, __FUNCTION__);
-    UnitCell &ucell = static_cast<UnitCell &>(basecell);
+    UnitCell &cell = static_cast<UnitCell &>(basecell);
 
+    const ModuleBase::Vector3<double> zero{0.0, 0.0, 0.0};
+    const PWForceResult result = cal_force_terms(cell, zero, {}, zero, nullptr, nullptr);
+    force = result.total;
+
+    ModuleIO::out_force_pw(&GlobalV::ofs_running, cell, result, this->inp_->test_force);
+}
+
+template <typename T, typename Device>
+PWForceResult ESolver_KS_PW<T, Device>::cal_force_terms(
+    UnitCell &ucell,
+    const ModuleBase::Vector3<double> &nonlocal_a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+    const ModuleBase::Vector3<double> &electric,
+    const hamilt::NLOrbData<double, Device> *nl_orbs,
+    const ModuleBase::matrix *ion_force)
+{
     Forces<double, Device> ff(ucell.nat);
+    PWForceResult result;
 
-    // mohan add 2025-10-12
     this->stp.update_psi_d();
 
-    // RT-TDDFT uses the accepted endpoint fields; ground-state calls pass zero fields.
-    ModuleBase::Vector3<double> nonlocal_a{0.0, 0.0, 0.0};
-    ModuleBase::Vector3<double> electric{0.0, 0.0, 0.0};
-    const elecstate::TDFieldManager *field = this->pelec->pot->td_field_manager();
-    if (this->inp_->esolver_type == "tddft")
-    {
-        electric = field->efield_ha();
-        // td_vg_nl = 2 includes the vector potential shift in the nonlocal force projectors.
-        if (field->gauge() == 1 && this->inp_->td_vg_nl == 2)
-        {
-            nonlocal_a = field->A_right_ha();
-        }
-    }
-    // Enable traveling projectors only for the selected RT-TDDFT model, even when ground-state MD carries ionic velocities.
-    const bool motion = this->inp_->esolver_type == "tddft" && this->inp_->td_nl_motion;
-    const std::vector<ModuleBase::Vector3<double>> ion_vel = pw::td_ion_vel(ucell, motion);
     ff.cal_force(
+        nl_orbs,
+        ion_force,
         this->inp_->esolver_type,
         nonlocal_a,
         ion_vel,
@@ -522,7 +524,7 @@ void ESolver_KS_PW<T, Device>::cal_force(BaseCell &basecell, ModuleBase::matrix 
         this->inp_->gga_grad,
         this->inp_->dft_plus_u || this->inp_->sc_mag_switch,
         ucell,
-        force,
+        &result,
         this->get_vdw_result(),
         *this->pelec,
         this->pw_rhod,
@@ -535,6 +537,8 @@ void ESolver_KS_PW<T, Device>::cal_force(BaseCell &basecell, ModuleBase::matrix 
         &this->kv,
         this->pw_wfc,
         this->stp.template get_psi_d<T, Device>());
+
+    return result;
 }
 
 template <typename T, typename Device>

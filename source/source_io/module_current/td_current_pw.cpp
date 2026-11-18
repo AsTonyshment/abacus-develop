@@ -5,15 +5,68 @@
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <limits.h>
+#include <unistd.h>
 
 namespace ModuleIO
 {
+void write_ion_current_pw(
+    const pw::TDVelResultPW &current,
+    const int &step,
+    const std::string &out_dir,
+    std::ostream *log)
+{
+    // Start both current series at the initial endpoint and append subsequent samples.
+    const std::ios::openmode mode = step == 0 ? std::ios::out | std::ios::trunc : std::ios::app;
+    for (int combined = 0; combined < 2; ++combined)
+    {
+        const std::string name = combined ? "current_eion.txt" : "current_ion.txt";
+        const std::string path = out_dir + name;
+        std::ofstream file(path, mode);
+        if (!file)
+        {
+            ModuleBase::WARNING_QUIT("write_ion_current_pw", "Cannot open " + path);
+        }
 
-void write_current_pw(const pw::TDVelResultPW& current,
-                      const int istep,
-                      const int nk_per_spin,
-                      const bool out_current_k,
-                      const std::string& out_dir)
+        if (step == 0)
+        {
+            std::string full_path = path;
+            if (path[0] != '/')
+            {
+                char cwd[PATH_MAX];
+                const std::size_t capacity = sizeof(cwd);
+                if (getcwd(cwd, capacity) == nullptr)
+                {
+                    ModuleBase::WARNING_QUIT("write_ion_current_pw", "Cannot resolve the output directory.");
+                }
+                full_path = std::string(cwd) + "/" + path;
+            }
+            *log << " Write file: " << full_path << '\n';
+        }
+
+        // Both files use charge current per volume in Hartree atomic units.
+        file << std::right << std::setw(6) << step + 1 << std::scientific << std::setprecision(12);
+        for (int d = 0; d < 3; ++d)
+        {
+            const double value = current.ionic[d] + (combined ? current.total[d] : 0.0);
+            file << "  " << std::setw(19) << value;
+        }
+        file << '\n';
+
+        file.close();
+        if (!file)
+        {
+            ModuleBase::WARNING_QUIT("write_ion_current_pw", "Failed to write " + path);
+        }
+    }
+}
+
+void write_current_pw(
+    const pw::TDVelResultPW &current,
+    const int istep,
+    const int nk_per_spin,
+    const bool out_current_k,
+    const std::string &out_dir)
 {
     // The initial endpoint starts a new series; later endpoints append.
     const std::ios::openmode mode = istep == 0 ? std::ios::out | std::ios::trunc : std::ios::app;
@@ -26,7 +79,7 @@ void write_current_pw(const pw::TDVelResultPW& current,
         ModuleBase::WARNING_QUIT("write_current_pw", "Cannot open " + filename_tot);
     }
     fout_tot << std::right << std::setw(6) << istep + 1 << std::scientific << std::setprecision(12);
-    for (double value: current.total)
+    for (double value : current.total)
     {
         fout_tot << "  " << std::setw(19) << value;
     }

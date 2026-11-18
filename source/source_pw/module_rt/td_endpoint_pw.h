@@ -4,6 +4,7 @@
 #include "source_estate/elecstate_pw.h"
 #include "source_pw/module_pwdft/hamilt_pw.h"
 #include "source_pw/module_rt/td_orbital_ops.h"
+#include "source_pw/module_rt/td_end_sample.h"
 
 namespace pw
 {
@@ -22,23 +23,44 @@ void orth_init_pw(
     int iter,
     bool do_orth);
 
-/** @brief Rebuild an accepted endpoint from its orbitals while retaining all occupations. */
+//! Prepare orbital density and its potential once for each retained electronic interval.
 template <typename T, typename Device>
-void rebuild_td_end(
-    psi::Psi<T, Device> &current,
-    elecstate::ElecStatePW<T, Device> &estate,
-    Charge &charge,
-    UnitCell &cell,
-    hamilt::HamiltPW<T, Device> &hamilt,
-    hsolver::TDOrbOps<T, Device> &orbitals,
+void prep_td_rho(const psi::Psi<T, Device> &current,
+                 elecstate::ElecStatePW<T, Device> *estate,
+                 Charge *charge,
+                 UnitCell *cell,
+                 const ModulePW::PW_Basis &rhod,
+                 const bool &rho_ready,
+                 const int &nspin,
+                 const int &imp_sol);
+
+/** @brief Evaluate endpoint energies and derivatives with the prepared density and potential.
+ * @param[in] current Retained endpoint orbitals, with fixed coefficients and occupations.
+ * @param[in,out] estate Electronic density-dependent energies and effective potential.
+ * @param[in] cell Endpoint geometry and nuclear velocities.
+ * @param[in,out] hamilt Endpoint operator bindings and projector workspace.
+ * @param[in,out] orbitals Band-energy workspace.
+ */
+template <typename T, typename Device>
+void eval_td_end(
+    const psi::Psi<T, Device> &current,
+    elecstate::ElecStatePW<T, Device> *estate,
+    const UnitCell &cell,
+    hamilt::HamiltPW<T, Device> *hamilt,
+    hsolver::TDOrbOps<T, Device> *orbitals,
     const ModulePW::PW_Basis_K &basis,
-    const ModulePW::PW_Basis &rhod,
     const ModuleBase::Vector3<double> &vecpot,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
-    int nspin,
-    int imp_sol,
-    bool sc_mag,
-    int dft_u,
+    TDEndpointPW<typename GetTypeReal<T>::type, Device> *endpoint,
+    const bool &need_products,
+    const bool &need_accel,
+    const bool &need_grad,
+    const ModuleBase::Vector3<double> &nl_a,
+    const ModuleBase::Vector3<double> &adot,
+    pseudopot_cell_vnl *pp,
+    const int &imp_sol,
+    const bool &sc_mag,
+    const int &dft_u,
     const std::string &assume_iso);
 } // namespace pw
 #endif

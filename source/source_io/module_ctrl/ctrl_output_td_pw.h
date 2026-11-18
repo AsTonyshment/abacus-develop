@@ -1,23 +1,18 @@
 #ifndef CTRL_OUTPUT_TD_PW_H
 #define CTRL_OUTPUT_TD_PW_H
 
+#include "source_base/vector3.h"
 #include "source_estate/module_pot/td_field_manager.h"
-#include "source_pw/module_rt/td_ion_accel.h"
 #include "source_pw/module_rt/td_obs_pw.h"
 
+#include <fstream>
 #include <ostream>
 #include <string>
 
 namespace ModuleIO
 {
-//! Print RT ionic force components, the total force and optional inertia-solver diagnostics on rank zero.
-void out_ion_force(
-    const UnitCell &cell,
-    const pw::IonAccel &ions,
-    const ModuleBase::matrix &force,
-    bool out_stat,
-    int rank,
-    std::ofstream &log);
+//! Print the accepted endpoint's effective-inertia solve status and relative residual.
+void out_ion_stat(std::ofstream *log, const int &status, const double &residual);
 
 //! Prepare enabled field files on the designated writer rank.
 void prep_td_out(
@@ -55,27 +50,54 @@ void out_td_energy(
     std::ostream *log,
     std::ostream *out);
 
-//! Log the trial interval and subdivision depth, print substeps, and return the formatted interval for retry messages.
-std::string print_td_trial(
-    double left,
-    double right,
-    int depth,
+//! Log the trial interval in fs and its subdivision depth, and print substeps.
+void print_td_trial(
+    const double &left,
+    const double &right,
+    const int &depth,
     std::ostream *log,
     std::ostream *out);
 
 //! Log the trial iteration count, residual, convergence and acceptance status.
 void print_td_result(
-    int iter,
-    double residual,
-    bool converged,
-    bool accepted,
+    const int &iter,
+    const double &res,
+    const bool &conv,
+    const bool &accepted,
     std::ostream *log);
 
 //! Report that an unconverged trial interval will be split into two half steps.
-void print_td_retry(const std::string &interval, std::ostream *out);
+void print_td_retry(const double &left, const double &right, std::ostream *out);
 
-//! Write precomputed endpoint observables on the designated output rank.
-void ctrl_output_td_pw(
+//! Log the original step and print the iteration when outer ionic self-consistency is enabled.
+void print_ion_trial(
+    const int &step,
+    const int &iter,
+    const int &limit,
+    std::ostream *log,
+    std::ostream *out);
+
+//! Log coupled diagnostics and print convergence details when outer ionic self-consistency is enabled.
+void print_td_coupled(
+    const int &step,
+    const int &iter,
+    const int &limit,
+    const int &elec_iters,
+    const double &elec_res,
+    const double &vel_res,
+    const double &vel_thr,
+    const double &inertia_res,
+    const int &inertia_status,
+    const bool &conv,
+    const bool &accepted,
+    std::ostream *log,
+    std::ostream *out);
+
+//! Print the prepared Cartesian vector potential in Hartree atomic units.
+void print_td_vecpot(const ModuleBase::Vector3<double> &vecpot, std::ofstream *log);
+
+//! Write precomputed PW endpoint currents and spin observables on the designated output rank.
+void out_curr_spin_pw(
     const pw::TDVelResultPW &currents,
     const pw::TDSpinResultPW &moments,
     const pw::CurrentRequest &request,

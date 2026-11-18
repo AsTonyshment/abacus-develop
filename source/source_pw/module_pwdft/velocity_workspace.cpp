@@ -18,12 +18,13 @@ std::complex<Real> *VelocityWorkspace<Real, Device>::project(
     const Complex *beta,
     const Complex *grad,
     const Complex *psi,
-    int npw,
-    int ld,
-    int nkb,
-    int cols,
-    int nderiv,
-    int ncomp)
+    const int &npw,
+    const int &ld,
+    const int &nkb,
+    const int &cols,
+    const int &nderiv,
+    const int &ncomp,
+    const Complex *beta_proj)
 {
     using CtDevice = typename ct::PsiToContainer<Device>::type;
     const std::int64_t block = static_cast<std::int64_t>(nkb) * cols;
@@ -36,10 +37,15 @@ std::complex<Real> *VelocityWorkspace<Real, Device>::project(
     }
     // Store beta overlaps, interleaved derivative overlaps, then space for up to four D-contracted blocks.
     Complex *buffer = coefficients_.template data<Complex>();
+    if (beta_proj != nullptr)
+    {
+        base_device::memory::synchronize_memory_op<Complex, Device, Device>()(buffer, beta_proj, block);
+    }
     if (npw == 0)
     {
         // Empty PW ranks still contribute zeros to the following collective projection reduction.
-        base_device::memory::set_memory_op<Complex, Device>()(buffer, 0, (1 + nderiv) * block);
+        const int64_t offset = beta_proj == nullptr ? 0 : block;
+        base_device::memory::set_memory_op<Complex, Device>()(buffer + offset, 0, (1 + nderiv) * block - offset);
     }
     else
     {
@@ -48,13 +54,25 @@ std::complex<Real> *VelocityWorkspace<Real, Device>::project(
         const int nkb3 = nderiv * nkb;
         if (cols == 1)
         {
-            ModuleBase::gemv_op<Complex, Device>()('C', npw, nkb, &one, beta, ld, psi, 1, &zero, buffer, 1);
-            ModuleBase::gemv_op<Complex, Device>()('C', npw, nkb3, &one, grad, ld, psi, 1, &zero, buffer + block, 1);
+            if (beta_proj == nullptr)
+            {
+                ModuleBase::gemv_op<Complex, Device>()('C', npw, nkb, &one, beta, ld, psi, 1, &zero, buffer, 1);
+            }
+            if (nderiv > 0)
+            {
+                ModuleBase::gemv_op<Complex, Device>()('C', npw, nkb3, &one, grad, ld, psi, 1, &zero, buffer + block, 1);
+            }
         }
         else
         {
-            ModuleBase::gemm_op<Complex, Device>()('C', 'N', nkb, cols, npw, &one, beta, ld, psi, ld, &zero, buffer, nkb);
-            ModuleBase::gemm_op<Complex, Device>()('C', 'N', nkb3, cols, npw, &one, grad, ld, psi, ld, &zero, buffer + block, nkb3);
+            if (beta_proj == nullptr)
+            {
+                ModuleBase::gemm_op<Complex, Device>()('C', 'N', nkb, cols, npw, &one, beta, ld, psi, ld, &zero, buffer, nkb);
+            }
+            if (nderiv > 0)
+            {
+                ModuleBase::gemm_op<Complex, Device>()('C', 'N', nkb3, cols, npw, &one, grad, ld, psi, ld, &zero, buffer + block, nkb3);
+            }
         }
     }
     return buffer;
@@ -64,14 +82,15 @@ template <typename Real, typename Device>
 void VelocityWorkspace<Real, Device>::contract(
     const UnitCell &cell,
     const pseudopot_cell_vnl &pp,
-    const int spin,
-    const int bands,
-    const int npol,
-    const int nderiv,
-    const int ncomp,
-    const Real scale,
+    const int &spin,
+    const int &bands,
+    const int &npol,
+    const int &nderiv,
+    const int &ncomp,
+    const Real &scale,
     const ModulePW::PW_Basis_K &basis,
-    Complex *buffer)
+    Complex *buffer,
+    const bool &beta_reduced)
 {
     ModuleBase::timer::start("VelocityWorkspace", "contract");
     const std::int64_t count = static_cast<std::int64_t>(bands) * pp.nkb;
@@ -99,7 +118,8 @@ void VelocityWorkspace<Real, Device>::contract(
 #endif
         // The complex reduction wrapper doubles the MPI element count.
         const std::int64_t max_chunk = std::numeric_limits<int>::max() / 2;
-        for (std::int64_t offset = 0; offset < projection_elements;)
+        const std::int64_t first = beta_reduced ? count : 0;
+        for (std::int64_t offset = first; offset < projection_elements;)
         {
             const std::int64_t remaining = projection_elements - offset;
             const int chunk_size = static_cast<int>(std::min(max_chunk, remaining));

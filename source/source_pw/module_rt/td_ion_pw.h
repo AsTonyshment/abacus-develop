@@ -9,8 +9,22 @@
 #include "source_estate/module_charge/charge.h"
 #include "source_estate/module_pot/potential_new.h"
 
+#include <fstream>
+#include <vector>
+
 namespace pw
 {
+/// Predict a Verlet endpoint from an accepted state and accelerations in Hartree units.
+unitcell::IonicState predict_ions(const unitcell::IonicState &left, const ModuleBase::matrix &accel, const double &dt);
+/// Form the endpoint velocity update and return its maximum free-component residual.
+double correct_ions(const unitcell::IonicState &left,
+                    const ModuleBase::matrix &left_accel,
+                    const ModuleBase::matrix &right_accel,
+                    const double &dt,
+                    unitcell::IonicState *right);
+/// Store accepted step displacements and periodic crossing counts in the backing cell.
+void store_ion_disp(const unitcell::IonicState &left, const unitcell::IonicState &right, UnitCell *cell);
+
 /** @brief Explicit samples at the nodes required by the propagation method. */
 class TDIonPath
 {
@@ -18,6 +32,8 @@ class TDIonPath
     explicit TDIonPath(const std::vector<unitcell::IonicState> &samples);
     /** @brief A constant geometry over a time interval, including arbitrary retry nodes. */
     TDIonPath(const unitcell::IonicState &stationary, double left, double right);
+    /** @brief A continuous cubic path with endpoint positions and derivative velocities. */
+    static TDIonPath hermite(const unitcell::IonicState &left, const unitcell::IonicState &right);
     unitcell::IonicState at(double time) const;
     /// @brief Validate samples and their connection to the accepted propagation origin.
     void check(const UnitCell &cell, const unitcell::IonicState &accepted, double time) const;
@@ -26,6 +42,7 @@ class TDIonPath
   private:
     std::vector<unitcell::IonicState> samples_;
     const bool stationary_;
+    bool hermite_ = false; ///< Set only by the Hermite factory; path evaluation is immutable.
 };
 
 /** @brief Refresh ionic operators on the existing PW grids. */
@@ -43,6 +60,8 @@ class TDIonPW
     void bind(const unitcell::IonicState &state);
     void update_pot(const unitcell::IonicState &state, elecstate::Potential *pot);
     const unitcell::IonicState &state() const;
+    //! Compute the bound geometry\'s Ewald energy in Ry.
+    double cal_ewald(const int &test_energy, std::ofstream *log);
 
   private:
     UnitCell &cell_;
@@ -53,7 +72,6 @@ class TDIonPW
     const bool has_float_;
     unitcell::IonicState state_;
     ModuleBase::matrix core_rad_;
-    std::vector<ModuleBase::Vector3<double>> end_frac_;
 };
 } // namespace pw
 

@@ -11,7 +11,7 @@ TEST_F(Observables, SOCTorqueMatchesCommutator)
     const std::string mag_partition = "none";
     pw::TDSpinPW<double, Device> observer;
     observer.initialize(cell_, basis_, basis_, kv_, sf_, pp_, mag_partition, "", 0.0, true);
-    const pw::TDSpinResultPW actual = observer.calculate(*psi_, state_, a, a, {});
+    const pw::TDSpinResultPW actual = observer.calculate(*psi_, state_, a, a, {}, nullptr);
     const Vector beta = projectors(a);
     const int n = psi_->get_nbasis();
     double signal = 0;
@@ -91,7 +91,7 @@ TEST_F(Observables, DensityMomentsAndPeriodicVoronoi)
     pw::TDSpinPW<double, Device> observer;
     observer.initialize(cell_, basis_, basis_, kv_, sf_, pp_, mag_partition, "", 0.0, true);
     const ModuleBase::Vector3<double> zero(0, 0, 0);
-    const pw::TDSpinResultPW actual = observer.calculate(*psi_, state_, zero, zero, {});
+    const pw::TDSpinResultPW actual = observer.calculate(*psi_, state_, zero, zero, {}, nullptr);
     const double integral = cell_.omega * (1.0 + 0.005 * (basis_.nxyz - 1));
     EXPECT_NEAR(actual.electrons, 2 * integral, 1e-10);
     EXPECT_NEAR(actual.mag_abs, std::sqrt(0.38) * integral, 1e-10);

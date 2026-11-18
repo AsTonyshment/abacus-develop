@@ -2,6 +2,7 @@
 #include "source_base/parallel_reduce.h"
 #include "source_base/timer.h"
 #include "source_base/tool_title.h"
+#include "source_cell/ionic_state.h"
 #include "source_pw/module_pwdft/fs_nonlocal_tools.h"
 
 #ifdef _OPENMP
@@ -10,6 +11,7 @@
 
 template <typename FPTYPE, typename Device>
 void Forces<FPTYPE, Device>::cal_force_nl(
+    const hamilt::NLOrbData<FPTYPE, Device> *nl_orbs,
     ModuleBase::matrix &forcenl,
     const ModuleBase::Vector3<double> &nonlocal_a,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
@@ -38,6 +40,12 @@ void Forces<FPTYPE, Device>::cal_force_nl(
 
     const int nks = wfc_basis->nks;
     const int max_nbands = wg.nc;
+    const int cols = psi_in->get_nbands() * psi_in->get_npol();
+    const bool reuse = nl_orbs != nullptr;
+    if (reuse && !nl_orbs->matches(ucell_in, nonlocal_a, ion_vel, nks, wfc_basis->npwk_max, cols, nlpp.nkb, 0))
+    {
+        ModuleBase::WARNING_QUIT("Forces::cal_force_nl", "Shared products belong to another force sample.");
+    }
     for (int ik = 0; ik < nks; ik++) // loop k points
     {
         // skip zero weights to speed up
@@ -52,10 +60,18 @@ void Forces<FPTYPE, Device>::cal_force_nl(
         }
         const int npm = nbands_occ;
         // RT-TDDFT evaluates the position force at fixed nuclear velocities; non-RT callers supply empty velocities.
-        nl_tools.cal_vkb(ik, max_nbands, nonlocal_a, ion_vel);
-        // calculate becp = <psi|beta> for all beta functions
-        nl_tools.cal_becp(ik, npm, &psi_in[0](ik, 0, 0));
-        nl_tools.reduce_pool_becp(max_nbands);
+        if (reuse)
+        {
+            const std::complex<FPTYPE> *beta = nl_orbs->beta(ik);
+            const std::complex<FPTYPE> *proj = nl_orbs->proj(ik);
+            nl_tools.load_orbs(ik, nl_orbs->cols(), nl_orbs->ld(), beta, proj);
+        }
+        else
+        {
+            nl_tools.cal_vkb(ik, max_nbands, nonlocal_a, ion_vel);
+            nl_tools.cal_becp(ik, npm, &psi_in[0](ik, 0, 0));
+            nl_tools.reduce_pool_becp(max_nbands);
+        }
         for (int ipol = 0; ipol < 3; ipol++)
         {
             nl_tools.cal_vkb_deri_f(ik, max_nbands, ipol);

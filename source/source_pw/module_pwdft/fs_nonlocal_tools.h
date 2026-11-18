@@ -39,6 +39,9 @@ class FS_Nonlocal_tools
         const ModuleBase::matrix &wg,
         const ModuleBase::matrix *p_ekb);
     ~FS_Nonlocal_tools();
+    /** @brief Load immutable endpoint projectors into the writable force workspace and reuse reduced overlaps. */
+    void load_orbs(const int &ik, const int &cols, const int &ld,
+                   const std::complex<FPTYPE> *beta, const std::complex<FPTYPE> *proj);
 
     /**
      * @brief Build projectors with a Hartree-unit momentum shift and a compact npw stride.

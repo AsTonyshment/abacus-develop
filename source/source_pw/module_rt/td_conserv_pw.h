@@ -5,6 +5,19 @@
 
 namespace pw
 {
+/** @brief Accepted endpoint energy contributions in Ry, including the KS smearing term. */
+struct TDEnergy
+{
+    double potential = 0.0; ///< Energy supplied to MD before adding ionic kinetic energy.
+    double total = 0.0; ///< Material energy including ionic kinetic and velocity corrections.
+    double total_field = 0.0; ///< Total energy including scalar-field coupling.
+    double elec_field = 0.0;
+    double ion_field = 0.0;
+    double kinetic = 0.0;
+    double vel_corr = 0.0;
+    double smearing = 0.0;
+};
+
 /** @brief Globally reduced electron counts and orthogonality errors. */
 struct TDConserv
 {

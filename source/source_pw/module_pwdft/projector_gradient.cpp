@@ -22,20 +22,21 @@ void ProjectorGradient<Real, Device>::reserve(ct::Tensor *tensor, const int64_t 
 }
 
 template <typename Real, typename Device>
-void ProjectorGradient<Real, Device>::calculate(
+void ProjectorGradient<Real, Device>::cal_sample(
     pseudopot_cell_vnl *pp,
     const UnitCell &cell,
     const ModulePW::PW_Basis_K &basis,
-    const int ik,
-    const ModuleBase::Vector3<double> &A,
+    const int &ik,
+    const ModuleBase::Vector3<double> &a,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
-    int order,
+    const int &order,
+    const Complex *sk,
     Complex *output)
 {
-    ModuleBase::timer::start("ProjectorGradient", "calculate");
+    ModuleBase::timer::start("ProjectorGradient", "cal_sample");
     if (pp->nkb == 0)
     {
-        ModuleBase::timer::end("ProjectorGradient", "calculate");
+        ModuleBase::timer::end("ProjectorGradient", "cal_sample");
         return;
     }
     pp->ensure_grad_table(cell);
@@ -90,7 +91,7 @@ void ProjectorGradient<Real, Device>::calculate(
     const int npw = basis.npwk[ik];
     if (npw == 0)
     {
-        ModuleBase::timer::end("ProjectorGradient", "calculate");
+        ModuleBase::timer::end("ProjectorGradient", "cal_sample");
         return;
     }
     const std::int64_t momentum_elements = 3 * static_cast<std::int64_t>(npw);
@@ -112,7 +113,7 @@ void ProjectorGradient<Real, Device>::calculate(
     host_q_.resize(momentum_elements);
     for (int ig = 0; ig < npw; ++ig)
     {
-        const ModuleBase::Vector3<double> q = basis.getgpluskcar(ik, ig) + A / cell.tpiba;
+        const ModuleBase::Vector3<double> q = basis.getgpluskcar(ik, ig) + a / cell.tpiba;
         for (int d = 0; d < 3; ++d)
         {
             host_q_[3 * static_cast<std::int64_t>(ig) + d] = static_cast<Real>(q[d]);
@@ -122,13 +123,9 @@ void ProjectorGradient<Real, Device>::calculate(
         const Real position = (radius + static_cast<Real>(vmax)) / static_cast<Real>(dq);
         pp->check_vnl_index(static_cast<double>(position) * (1.0 + 8.0 * std::numeric_limits<Real>::epsilon()), true);
     }
-    const std::int64_t structure_elements = static_cast<std::int64_t>(cell.nat) * npw;
     reserve<Real>(&momentum_, momentum_elements);
-    reserve<Complex>(&structure_, structure_elements);
     base_device::memory::synchronize_memory_op<Real, Device, base_device::DEVICE_CPU>()(
         momentum_.template data<Real>(), host_q_.data(), momentum_elements);
-    Device *ctx = nullptr;
-    pp->psf->get_sk(ctx, ik, &basis, structure_.template data<Complex>());
     // Select a compiled derivative order before launching the shared CPU/GPU evaluator.
     const Real grid_dq = static_cast<Real>(dq);
     const Real tpiba = static_cast<Real>(cell.tpiba);
@@ -136,7 +133,6 @@ void ProjectorGradient<Real, Device>::calculate(
     const Real *q = momentum_.template data<Real>();
     const Real *radial = radial_.template data<Real>();
     const Real *first = derivative_.template data<Real>();
-    const Complex *sk = structure_.template data<Complex>();
     if (order == 1)
     {
         proj_eval_op<Real, Device, 1>()(
@@ -177,8 +173,24 @@ void ProjectorGradient<Real, Device>::calculate(
             sk,
             output);
     }
-    ModuleBase::timer::end("ProjectorGradient", "calculate");
+    ModuleBase::timer::end("ProjectorGradient", "cal_sample");
 }
+template <typename Real, typename Device>
+void ProjectorGradient<Real, Device>::calculate(
+    pseudopot_cell_vnl *pp, const UnitCell &cell, const ModulePW::PW_Basis_K &basis,
+    const int &ik, const ModuleBase::Vector3<double> &a,
+    const std::vector<ModuleBase::Vector3<double>> &vel, const int &order, Complex *output)
+{
+    const int64_t size = static_cast<int64_t>(cell.nat) * basis.npwk[ik];
+    reserve<Complex>(&structure_, size);
+    Complex *sk = structure_.template data<Complex>();
+    if (basis.npwk[ik] > 0 && pp->nkb > 0)
+    {
+        pp->psf->get_sk(static_cast<Device *>(nullptr), ik, &basis, sk);
+    }
+    cal_sample(pp, cell, basis, ik, a, vel, order, sk, output);
+}
+
 template class ProjectorGradient<float, base_device::DEVICE_CPU>;
 template class ProjectorGradient<double, base_device::DEVICE_CPU>;
 #if defined(__CUDA) || defined(__ROCM)

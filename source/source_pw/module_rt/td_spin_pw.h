@@ -1,6 +1,8 @@
 #ifndef TD_SPIN_PW_H
 #define TD_SPIN_PW_H
 
+#include "source_pw/module_pwdft/nl_orb_data.h"
+
 #include "source_base/module_container/ATen/core/tensor.h"
 #include "source_estate/elecstate.h"
 #include "source_pw/module_proj/onsite_proj.h"
@@ -51,6 +53,7 @@ class TDSpinPW
         const ModuleBase::matrix &weights,
         const ModuleBase::Vector3<double> &a,
         const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+        const hamilt::NLOrbData<Real, Device> *nl_orbs,
         TDSpinResultPW *result);
     void onsite(
         const psi::Psi<Complex, Device> &psi,
@@ -86,7 +89,8 @@ class TDSpinPW
         const elecstate::ElecState &state,
         const ModuleBase::Vector3<double> &a,
         const ModuleBase::Vector3<double> &nonlocal_a,
-        const std::vector<ModuleBase::Vector3<double>> &ion_vel);
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+        const hamilt::NLOrbData<Real, Device> *nl_orbs);
 };
 } // namespace pw
 #endif

@@ -1,5 +1,6 @@
 #include "md_func.h"
 #include "source_cell/dom_decomp.h"
+#include "source_cell/update_cell.h"
 
 #include "source_base/global_variable.h"
 #include "source_base/parallel_cell.h"
@@ -199,7 +200,7 @@ void init_vel(MDCell& mdcell,
 {
     if (mdcell.has_backing_unitcell())
     {
-        const UnitCell& unit = mdcell.backing_unitcell();
+        UnitCell& unit = mdcell.backing_unitcell();
         std::vector<double> masses(static_cast<std::size_t>(unit.nat), 0.0);
         std::vector<ModuleBase::Vector3<int> > mobile(static_cast<std::size_t>(unit.nat));
         std::vector<ModuleBase::Vector3<double> > velocities(static_cast<std::size_t>(unit.nat));
@@ -241,14 +242,10 @@ void init_vel(MDCell& mdcell,
                      velocities.data());
         }
 
-        std::vector<int> offsets(static_cast<std::size_t>(unit.ntype + 1), 0);
-        for (int it = 0; it < unit.ntype; ++it)
-        {
-            offsets[static_cast<std::size_t>(it + 1)] = offsets[static_cast<std::size_t>(it)] + unit.atoms[it].na;
-        }
+        unitcell::update_vel(velocities.data(), unit.ntype, unit.nat, unit.atoms);
         for (LocalAtom& atom : mdcell.owned_atoms())
         {
-            atom.vel = velocities[static_cast<std::size_t>(offsets[static_cast<std::size_t>(atom.type)] + atom.type_index)];
+            atom.vel = unit.atoms[atom.type].vel[atom.type_index];
         }
         return;
     }
@@ -307,6 +304,46 @@ void init_vel(MDCell& mdcell,
     {
         const double factor = sqrt(temperature / current);
         for (LocalAtom& atom : atoms) atom.vel *= factor;
+    }
+}
+
+void coupled_step(
+    ModuleESolver::ESolver *solver,
+    const int &step,
+    MDCell *cell,
+    double *potential)
+{
+    // The coupled solver receives the simultaneous MD velocities, including initialization.
+    cell->sync_backing_unitcell(false);
+    UnitCell &unit = cell->backing_unitcell();
+
+    solver->runner(unit, step);
+
+    // Convert the accepted energy and force from Ry units to the Hartree units used by MD.
+    *potential = 0.5 * solver->cal_energy();
+    ModuleBase::matrix force(unit.nat, 3);
+    solver->cal_force(unit, force);
+    force *= 0.5;
+
+    // Map each type-local atom index to its row in the global force matrix.
+    std::vector<int> offsets(unit.ntype + 1, 0);
+    for (int it = 0; it < unit.ntype; ++it)
+    {
+        offsets[it + 1] = offsets[it] + unit.atoms[it].na;
+    }
+
+    // Transfer the simultaneous accepted endpoint to the atoms owned by this MD rank.
+    for (LocalAtom &atom : cell->owned_atoms())
+    {
+        const Atom &source = unit.atoms[atom.type];
+        const int ia = atom.type_index;
+        const int id = offsets[atom.type] + ia;
+        atom.frac = source.taud[ia];
+        atom.cart = source.tau[ia];
+        atom.vel = source.vel[ia];
+        atom.displacement = source.dis[ia];
+        atom.boundary_shift = source.boundary_shift[ia];
+        atom.force.set(force(id, 0), force(id, 1), force(id, 2));
     }
 }
 

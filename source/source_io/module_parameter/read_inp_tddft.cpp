@@ -145,6 +145,32 @@ void check_td_efield_parameters(const Input_para& input)
 
 void ReadInput::item_rt_tddft()
 {
+    {
+        Input_Item item("td_ion_nmax");
+        item.domain.set_rule("value>=1");
+        item.annotation = "ionic velocity corrector iteration limit";
+        item.category = "Real-Time TDDFT (PW)";
+        item.type = "Integer";
+        item.description = "Maximum number of ionic velocity self-consistency iterations per PW Ehrenfest time step. The default value of `1` performs one electronic propagation followed by a velocity correction, without outer ionic velocity self-consistency. Set an integer greater than `1` to enable self-consistency for more accurate electron-ion propagation.";
+        item.default_value = "1";
+        item.unit = "";
+        item.set_availability("basis_type==pw and esolver_type==tddft");
+        read_sync_int(input.td_ion_nmax);
+        this->add_item(item);
+    }
+    {
+        Input_Item item("td_ion_thr");
+        item.domain.set_rule("value>0");
+        item.annotation = "ionic velocity corrector tolerance";
+        item.category = "Real-Time TDDFT (PW)";
+        item.type = "Real";
+        item.description = "Convergence threshold for the maximum absolute change in a movable Cartesian velocity component during an ionic correction, used when `td_ion_nmax` is greater than `1`.";
+        item.default_value = "1e-8";
+        item.unit = "Bohr per Hartree atomic time";
+        item.set_availability("basis_type==pw and esolver_type==tddft");
+        read_sync_double(input.td_ion_thr);
+        this->add_item(item);
+    }
     // NOTE: The order of add_item() calls below determines the parameter order
     // in the generated documentation (docs/advanced/input_files/input-main.md).
     // Please preserve this ordering when adding new parameters.
@@ -172,7 +198,7 @@ void ReadInput::item_rt_tddft()
         item.annotation = "output PW real-time conservation diagnostics";
         item.category = "Real-Time TDDFT (PW)";
         item.type = "Boolean";
-        item.description = R"(Write wavefunction and density electron counts, their changes from the initial state, and orthogonality errors to the running log after each electronic evolution step. Electron counts describe the end-of-step state; orthogonality errors before and after correction are separate maxima over all SCF iterations and k points within that step. When half-step retries are enabled, only accepted substeps contribute to these maxima. Orthogonality errors are omitted when `td_orthonormal=none`.
+        item.description = R"(Write wavefunction and density electron counts, their changes from the initial state, and orthogonality errors before and after correction to the running log after each electronic evolution step. Orthogonality errors are omitted when `td_orthonormal=none`.
 
 The file `OUT.{suffix}/td_energy.txt` records the electronic step, time in fs, and the following energies in Rydberg:
 
@@ -189,9 +215,7 @@ The energies use the generalized Kohn-Sham free-energy functional $F$, including
 
 For Fermi-Dirac smearing, $E_{\mathrm{sm}}=-T_{\mathrm{e}}S$ is the electronic entropy term; other smearing methods use their corresponding generalized entropy contribution.
 
-Here $\rho$, $Z_I$, and $\boldsymbol{R}_I$ denote the electron number density, ionic valence charge, and ionic position. The electron's external scalar potential energy is $V_{\mathrm{ext}}(\boldsymbol{r},t)=e\boldsymbol{E}(t)\cdot\boldsymbol{r}$ for a uniform field in the length gauge, where $e$ is the positive elementary charge. In the velocity gauge, $V_{\mathrm{ext}}=0$.
-
-[NOTE] Enabling this output adds density integration and diagnostic communication.)";
+Here $\rho$, $Z_I$, and $\boldsymbol{R}_I$ denote the electron number density, ionic valence charge, and ionic position. The electron's external scalar potential energy is $V_{\mathrm{ext}}(\boldsymbol{r},t)=e\boldsymbol{E}(t)\cdot\boldsymbol{r}$ for a uniform field in the length gauge, where $e$ is the positive elementary charge. In the velocity gauge, $V_{\mathrm{ext}}=0$.)";
         item.default_value = "false";
         item.unit = "";
         item.set_availability("basis_type==pw and esolver_type==tddft");
@@ -205,7 +229,7 @@ Here $\rho$, $Z_I$, and $\boldsymbol{R}_I$ denote the electron number density, i
         item.annotation = "maximum depth of PW real-time half-step retries";
         item.category = "Real-Time TDDFT (PW)";
         item.type = "Integer";
-        item.description = R"(Maximum number of recursive halvings of an electronic propagation interval when self-consistency fails. Zero disables retries. Each full-step or subdivided trial uses at most `td_scf_nmax` iterations. The smallest internal time step is `td_dt / 2^td_max_halvings`; output times and the physical field profile retain the original `td_dt` grid. A value of 3 allows internal steps down to `td_dt / 8`.)";
+        item.description = R"(Maximum number of recursive halvings of an electronic propagation interval when self-consistency fails. Zero disables retries. The smallest internal time step is `td_dt / 2^td_max_halvings`.)";
         item.default_value = "0";
         item.unit = "";
         item.set_availability("basis_type==pw and esolver_type==tddft");
@@ -218,7 +242,7 @@ Here $\rho$, $Z_I$, and $\boldsymbol{R}_I$ denote the electron number density, i
         item.annotation = "SCF iteration limit per real-time propagation attempt";
         item.category = "Real-Time TDDFT (Common)";
         item.type = "Integer";
-        item.description = R"(Maximum number of self-consistency iterations for each real-time propagation step in PW and LCAO calculations. Must be an integer of at least 2. Convergence can end the iterations early. In PW calculations, when `td_max_halvings` is positive, the limit applies independently to each full-step or subdivided trial. This parameter is independent of `scf_nmax`.)";
+        item.description = "Maximum number of electronic self-consistency iterations per real-time propagation interval in PW and LCAO calculations.";
         item.default_value = "100";
         item.unit = "";
         item.set_availability("esolver_type==tddft and basis_type in [pw, lcao]");

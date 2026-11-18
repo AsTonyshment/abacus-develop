@@ -179,11 +179,6 @@ void MD_base::print_md(std::ofstream& ofs, const bool& cal_stress)
 {
     t_current = MD_func::current_temp(kinetic, mdcell, frozen_freedom_);
 
-    if (my_rank!=0)
-    {
-        return;
-    }
-
     assert(ModuleBase::BOHR_RADIUS_SI>0.0);
 
     const double unit_transform = ModuleBase::HARTREE_SI / pow(ModuleBase::BOHR_RADIUS_SI, 3) * 1.0e-8;
@@ -193,7 +188,7 @@ void MD_base::print_md(std::ofstream& ofs, const bool& cal_stress)
         press += stress(i, i) / 3;
     }
 
-    // screen output
+    // Stdout and per-rank logs follow the process-wide output setup.
     std::cout << std::setprecision(8);
     std::cout << " ------------------------------------------------------------------------------------------------"
               << std::endl;

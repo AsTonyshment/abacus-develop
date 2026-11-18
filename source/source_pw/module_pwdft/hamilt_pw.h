@@ -9,6 +9,7 @@
 #include "source_pw/module_pwdft/dftu_base.h"
 #include "source_pw/module_pwdft/exx_helper.h"
 #include "source_pw/module_pwdft/vnl_pw.h"
+#include "source_pw/module_pwdft/nl_proj_pw.h"
 
 /// General_Exx_Info forward declaration, full definition in general_exx_info.h
 struct General_Exx_Info;
@@ -45,9 +46,17 @@ class HamiltPW : public Hamilt<T, Device>
 
     /** @brief Bind RT-TDDFT local-potential buffers, vector potential and nuclear velocities at the same operator time.
      *  @param ion_vel Type-major velocities in Hartree atomic units; empty selects RT-TDDFT without the nuclear velocity phase.
-     *  @note The caller must keep the buffers alive and restore endpoint state after propagation.
+     *  @param tau Explicit Cartesian sampling positions in units of lat0.
+     *  @note The caller keeps potential buffers alive and selects endpoint operators after propagation.
      */
-    void bind_td_state(const Real *veff, const ModuleBase::Vector3<double> &A_ha, const std::vector<ModuleBase::Vector3<double>> &ion_vel);
+    void bind_td_state(const Real *veff, const ModuleBase::Vector3<double> &A_ha,
+                       const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+                       const std::vector<ModuleBase::Vector3<double>> &tau);
+
+    /** @brief Access RT projectors owned by the nonlocal operator. */
+    NLProjPW<Real, Device> &td_projectors();
+    /** @brief Borrow the nonlocal overlaps produced by the last Hpsi call. */
+    const T *td_projections() const;
 
     void sPsi(
         const T *psi_in, // psi

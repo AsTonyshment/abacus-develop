@@ -6,6 +6,7 @@
 #include "source_base/global_variable.h"
 #include "source_base/matrix.h"
 #include "source_cell/unitcell.h"
+#include "source_pw/module_pwdft/force_result.h"
 
 namespace elecstate
 {
@@ -14,6 +15,9 @@ struct Efermi;
 
 namespace ModuleIO
 {
+
+/// @brief Print the PW force summary and optional contributions once in eV/Angstrom to enabled output streams.
+void out_force_pw(std::ofstream* log, const UnitCell& cell, const PWForceResult& result, const bool& details);
 
 /// @brief output if is convergence and energy after scf
 /// @param convergence if is convergence
@@ -53,12 +57,12 @@ void output_vacuum_level(const UnitCell* ucell,
                          const int& startz_current,
                          std::ofstream& ofs_running);
 
-/// @brief output atomic forces
+/// @brief Print a labeled force table to the open log and, when test_force is enabled, the active stdout.
 /// @param ofs the output stream
 /// @param cell the unitcell
 /// @param name force term name
-/// @param force atomic forces
-/// @param ry true if the unit of force is a.u.
+/// @param force Atomic forces in Ry/Bohr.
+/// @param ry True keeps Ry/Bohr; false converts to eV/Angstrom.
 void print_force(std::ofstream& ofs,
                  const UnitCell& cell,
                  const std::string& name,

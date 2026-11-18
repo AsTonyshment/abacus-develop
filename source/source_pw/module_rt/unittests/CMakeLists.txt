@@ -38,10 +38,12 @@ if(ENABLE_MPI)
             test_td_vel_pw.cpp
             ../td_spin_pw.cpp
             ../td_vel_pw.cpp
+            ../kernels/nl_current_op.cpp
             ../td_pw.cpp
             ../../module_pwdft/op_pw_vel.cpp
             ../../module_pwdft/projector_gradient.cpp
             ../../module_pwdft/velocity_workspace.cpp
+            ../../module_pwdft/nl_orb_data.cpp
             ../../module_pwdft/nonlocal_workspace.cpp
             ../../module_pwdft/vnl_pw.cpp
             ../../module_pwdft/vnl_pw_init_vnl.cpp
@@ -66,6 +68,7 @@ if(ENABLE_MPI)
             ../../../source_cell/reciprocal_grid.cpp
             ../../../source_cell/klist_io.cpp
             ../../../source_cell/unitcell.cpp
+            ../../../source_cell/ionic_state.cpp
             ../../../source_cell/unitcell_index.cpp
             ../../../source_cell/atom_spec.cpp
             ../../../source_cell/atom_pseudo.cpp

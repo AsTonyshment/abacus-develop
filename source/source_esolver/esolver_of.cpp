@@ -1,4 +1,6 @@
 #include "esolver_of.h"
+#include "source_io/module_output/output_log.h"
+#include "source_pw/module_pwdft/force_result.h"
 
 #include <cstddef>
 
@@ -537,15 +539,18 @@ void ESolver_OF::cal_force(BaseCell& basecell, ModuleBase::matrix& force)
     UnitCell& ucell = static_cast<UnitCell&>(basecell);
 
     Forces<double> ff(ucell.nat);
+    PWForceResult result;
  
     // here nullptr is for DFT+U, which may cause bugs, mohan note 2025-11-07
     // solvent can be used? mohan ask 2025-11-07
     // Zero fields and empty velocities retain the OFDFT force model; the added field and velocity arguments serve RT-TDDFT.
     const ModuleBase::Vector3<double> zero_field{0.0, 0.0, 0.0};
-    ff.cal_force(this->inp_->esolver_type, zero_field, {}, zero_field, this->inp_->nspin, PARAM.globalv.domag, PARAM.globalv.domag_z, this->inp_->gga_grad,
+    ff.cal_force(nullptr, nullptr, this->inp_->esolver_type, zero_field, {}, zero_field, this->inp_->nspin, PARAM.globalv.domag, PARAM.globalv.domag_z, this->inp_->gga_grad,
                  this->inp_->dft_plus_u || this->inp_->sc_mag_switch,
-                 ucell, force, this->get_vdw_result(), *pelec, this->pw_rho, &ucell.symm, &sf,
+                 ucell, &result, this->get_vdw_result(), *pelec, this->pw_rho, &ucell.symm, &sf,
                  this->solvent, nullptr, &this->locpp);
+    force = result.total;
+    ModuleIO::out_force_pw(&GlobalV::ofs_running, ucell, result, this->inp_->test_force);
 }
 
 /**

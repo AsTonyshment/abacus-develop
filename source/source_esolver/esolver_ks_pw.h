@@ -1,8 +1,10 @@
 #ifndef ESOLVER_KS_PW_H
 #define ESOLVER_KS_PW_H
-#include "./esolver_ks.h"
+#include "source_esolver/esolver_ks.h"
 #include "source_psi/setup_psi_pw.h" // mohan add 20251012
 #include "source_pw/module_pwdft/exx_helper_base.h"
+#include "source_pw/module_pwdft/force_result.h"
+#include "source_pw/module_pwdft/nl_orb_data.h"
 #include "source_pw/module_pwdft/vsep_pw.h"
 
 #include <memory>
@@ -35,6 +37,15 @@ class ESolver_KS_PW : public ESolver_KS
     Exx_HelperBase* exx_helper = nullptr;
 
   protected:
+    //! Evaluate position-force contributions without emitting force tables.
+    PWForceResult cal_force_terms(
+        UnitCell &cell,
+        const ModuleBase::Vector3<double> &nonlocal_a,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+        const ModuleBase::Vector3<double> &electric,
+        const hamilt::NLOrbData<double, Device> *nl_orbs,
+        const ModuleBase::matrix *ion_force);
+
     virtual void before_scf(UnitCell& ucell, const int istep) override;
 
     virtual void iter_init(UnitCell& ucell, const int istep, const int iter) override;
@@ -49,13 +60,13 @@ class ESolver_KS_PW : public ESolver_KS
 
     virtual void allocate_hamilt(const UnitCell& ucell);
 
-    /** @brief Let RT-TDDFT bind its endpoint field before wavefunction initialization uses H; ordinary DFT does nothing. */
+    //! Let RT-TDDFT bind its endpoint field before wavefunction initialization uses H; ordinary DFT does nothing.
     virtual void prepare_init_hamilt(const UnitCell& ucell);
 
-    // Electronic wave function psi
+    //! Electronic wave function psi
     Setup_Psi_pw stp;
 
-    // DFT-1/2 method
+    //! DFT-1/2 method
     VSep* vsep_cell = nullptr;
 };
 } // namespace ModuleESolver

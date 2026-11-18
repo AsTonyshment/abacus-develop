@@ -67,6 +67,23 @@ void check_td_ions(const Input_para &input)
     }
 }
 
+void check_td_coupled(const Input_para &input)
+{
+    check_td_ions(input);
+    if (input.estep_per_md != 1)
+    {
+        ModuleBase::WARNING_QUIT("check_td_coupled", "Moving-ion PW Ehrenfest dynamics requires estep_per_md=1.");
+    }
+    if (input.mdp.md_type != "nve")
+    {
+        ModuleBase::WARNING_QUIT("check_td_coupled", "Coupled PW ions require md_type=nve.");
+    }
+    if (input.cal_stress || input.mdp.plumed)
+    {
+        ModuleBase::WARNING_QUIT("check_td_coupled", "Coupled PW ions require cal_stress=false and plumed=false.");
+    }
+}
+
 double td_momentum_bound(const ModulePW::PW_Basis_K &basis, const double tpiba)
 {
     ModuleBase::timer::start("pw", "td_momentum_bound");
@@ -81,6 +98,38 @@ double td_momentum_bound(const ModulePW::PW_Basis_K &basis, const double tpiba)
     Parallel_Reduce::reduce_max(bound);
     ModuleBase::timer::end("pw", "td_momentum_bound");
     return bound;
+}
+
+double td_sample_bound(
+    const double &qmax,
+    const ModuleBase::Vector3<double> &a_left,
+    const ModuleBase::Vector3<double> &a_right,
+    const ModuleBase::Vector3<double> &a_prop,
+    const bool &shift_a,
+    const std::vector<ModuleBase::Vector3<double>> &vel,
+    const unitcell::IonicState &prop,
+    const unitcell::IonicState &left,
+    const bool &sample_vel)
+{
+    const double amax = shift_a ? std::max({a_left.norm(), a_right.norm(), a_prop.norm()}) : 0.0;
+    double vmax = 0.0;
+    for (const ModuleBase::Vector3<double> &v : vel)
+    {
+        vmax = std::max(vmax, v.norm());
+    }
+    if (sample_vel)
+    {
+        for (const unitcell::IonicAtom &atom : prop.atoms)
+        {
+            vmax = std::max(vmax, atom.velocity.norm());
+        }
+        for (const unitcell::IonicAtom &atom : left.atoms)
+        {
+            vmax = std::max(vmax, atom.velocity.norm());
+        }
+    }
+    // The triangle bound covers sampled G+k+A-v_I without constructing a momentum grid for each atom.
+    return qmax + amax + vmax;
 }
 
 std::vector<ModuleBase::Vector3<double>> td_ion_vel(const UnitCell &cell, bool motion)

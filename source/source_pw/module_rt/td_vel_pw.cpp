@@ -2,7 +2,10 @@
 
 #include "source_base/parallel_reduce.h"
 #include "source_base/timer.h"
+#include "source_cell/ionic_state.h"
+#include "source_hsolver/module_linalg/linear_algebra.h"
 #include "source_hsolver/module_linalg/kernels/linear_op.h"
+#include "source_pw/module_rt/kernels/nl_current_op.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -34,7 +37,8 @@ TDVelResultPW TDVelPW<Real, Device>::calculate(
     const ModuleBase::Vector3<double> &a,
     const ModuleBase::Vector3<double> &nonlocal_a,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
-    const CurrentRequest &request)
+    const CurrentRequest &request,
+    const hamilt::NLOrbData<Real, Device> *nl_orbs)
 {
     ModuleBase::timer::start("TDVelPW", "calculate");
     if (cell_ == nullptr)
@@ -48,9 +52,31 @@ TDVelResultPW TDVelPW<Real, Device>::calculate(
         return result;
     }
     const int npol = psi.get_npol();
+    if (request.charge_total && request.charge_ions)
+    {
+        // UnitCell contains each physical atom once on every rank; no reduction is needed.
+        for (int it = 0; it < cell_->ntype; ++it)
+        {
+            const Atom &atoms = cell_->atoms[it];
+            const double weight = atoms.ncpp.zv / cell_->omega;
+            for (int ia = 0; ia < atoms.na; ++ia)
+            {
+                for (int d = 0; d < 3; ++d)
+                {
+                    result.ionic[d] += weight * atoms.vel[ia][d];
+                }
+            }
+        }
+    }
     const int npwx = basis_->npwk_max;
     const int nbands = psi.get_nbands();
     const int ncols = nbands * npol;
+    const bool reuse = nl_orbs != nullptr && pp_->nkb > 0
+        && nl_orbs->matches(*cell_, nonlocal_a, ion_vel, basis_->nks, npwx, ncols, pp_->nkb, 3);
+    if (nl_orbs != nullptr && !reuse)
+    {
+        ModuleBase::WARNING_QUIT("RT observables", "Shared products belong to another endpoint.");
+    }
     const int old_k = psi.get_current_k();
     if (psi.get_nbasis() != npwx * npol || npol != cell_->get_npol() || (request.spin_current && npol != 2))
     {
@@ -61,6 +87,7 @@ TDVelResultPW TDVelPW<Real, Device>::calculate(
     {
         vel_.reset(new hamilt::Velocity<Real, Device>(basis_, kv_->isk.data(), pp_, cell_, true, nullptr, 0, 0));
     }
+    vel_->nonlocal = !reuse;
 
     using CtDevice = typename ct::PsiToContainer<Device>::type;
     using CopyToHost = base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>;
@@ -103,6 +130,10 @@ TDVelResultPW TDVelPW<Real, Device>::calculate(
         }
         vel_->init(ik, a, nonlocal_a, ion_vel);
         vel_->act(&psi, ncols, data, vpsi, false);
+        if (reuse && basis_->poolrank == 0)
+        {
+            add_nl_current(*nl_orbs, ik, state.wg, request, &result);
+        }
         if (npw == 0)
         {
             // Projection reductions above are collective; only local inner products can be skipped.
@@ -201,6 +232,53 @@ TDVelResultPW TDVelPW<Real, Device>::calculate(
     }
     ModuleBase::timer::end("TDVelPW", "calculate");
     return result;
+}
+
+template <typename Real, typename Device>
+void TDVelPW<Real, Device>::add_nl_current(const hamilt::NLOrbData<Real, Device> &orbs, const int &ik,
+                                          const ModuleBase::matrix &weights, const CurrentRequest &request,
+                                          TDVelResultPW *result)
+{
+    ModuleBase::timer::start("TDVelPW", "add_nl_current");
+    const int bands = weights.nc;
+    const int npol = cell_->get_npol();
+    const int ncomp = request.spin_current ? 12 : 3;
+    const int64_t size = static_cast<int64_t>(ncomp) * bands;
+    hsolver::linear_buffer<double, Device>(&nl_dots_, size);
+    nl_host_.resize(size);
+    const Complex *proj = orbs.proj(ik);
+    const Complex *grad = orbs.grad(ik);
+    const Complex *dproj = orbs.dproj(ik);
+    const Complex *dgrad = orbs.dgrad(ik);
+    nl_current_op<Real, Device>()(orbs.nkb(), bands, npol, ncomp, proj, grad, dproj, dgrad, nl_dots_.template data<double>());
+    base_device::memory::synchronize_memory_op<double, base_device::DEVICE_CPU, Device>()(
+        nl_host_.data(), nl_dots_.template data<double>(), size);
+    for (int d = 0; d < 3; ++d)
+    {
+        for (int band = 0; band < bands; ++band)
+        {
+            const double charge = -weights(ik, band) * nl_host_[d * bands + band];
+            if (request.charge_total)
+            {
+                result->total[d] += charge;
+            }
+            if (request.charge_per_k)
+            {
+                result->per_k[3 * kv_->ik2iktot[ik] + d] += charge;
+            }
+        }
+    }
+    if (request.spin_current)
+    {
+        for (int d = 0; d < 9; ++d)
+        {
+            for (int band = 0; band < bands; ++band)
+            {
+                result->spin[d] += weights(ik, band) * nl_host_[(3 + d) * bands + band];
+            }
+        }
+    }
+    ModuleBase::timer::end("TDVelPW", "add_nl_current");
 }
 
 template class TDVelPW<float, base_device::DEVICE_CPU>;

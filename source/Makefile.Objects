@@ -352,6 +352,7 @@ OBJS_ESOLVER=esolver_factory.o\
     esolver_ks_pw.o\
     esolver_ks_pw_tddft.o\
     pw_td_obs.o\
+    pw_td_state.o\
     esolver_ks_lcaopw.o\
     esolver_sdft_pw.o\
     esolver_forcefields.o\
@@ -405,12 +406,14 @@ OBJS_HAMILT=hamilt_pw.o\
     td_ion_pi_pw.o\
     td_ion_accel.o\
     ion_pi_op.o\
+    nl_current_op.o\
     ion_deriv_op.o\
     prop_cn_pw.o\
     prop_etrs_pw.o\
     td_history_pw.o\
     td_conserv_pw.o\
     td_endpoint_pw.o\
+    td_end_sample.o\
     td_vel_pw.o\
     td_spin_pw.o\
     td_pw.o\
@@ -430,6 +433,8 @@ OBJS_HAMILT=hamilt_pw.o\
     projector_gradient.o\
     velocity_workspace.o\
     nonlocal_workspace.o\
+    nl_proj_pw.o\
+    nl_orb_data.o\
     op_pw_nl.o\
     op_pw_nl_td.o\
     projector_gradient_op.o\
@@ -1069,6 +1074,7 @@ OBJS_SRCPW=h_ewald_pw.o\
     occupy.o\
     stru_fac.o\
     stru_fac_k.o\
+    atom_phase.o\
     soc.o\
     sto_hsolver_pw.o\
     sto_iter.o\

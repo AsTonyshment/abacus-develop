@@ -2,7 +2,6 @@
 
 #include "source_pw/module_rt/prop_cn_pw.h"
 #include "source_pw/module_rt/prop_etrs_pw.h"
-#include "source_pw/module_rt/td_ion_pw.h"
 
 #include <utility>
 
@@ -76,21 +75,20 @@ template <typename T, typename Device>
 void TDPropPW<T, Device>::evolve(
     hamilt::HamiltPW<T, Device> *hamilt,
     const typename GetTypeReal<T>::type *veff,
-    int nveff,
+    const int &nveff,
     const TDHistoryPW<T, Device> &history,
     const elecstate::TDFieldManager &field,
-    TDIonPW *ions,
     const unitcell::IonicState &sample,
     const unitcell::IonicState &right,
     psi::Psi<T, Device> *current,
-    int elec_step,
-    int scf_iter,
-    bool log_detail)
+    const int &elec_step,
+    const int &scf_iter,
+    const bool &log_detail)
 {
-    TDHamiltPW<T, Device> td_hamilt(hamilt, basis_, ions, motion_);
+    TDHamiltPW<T, Device> td_hamilt(hamilt, basis_, motion_);
     prop_->evolve(&td_hamilt, history, veff, nveff, field, sample, right, current, elec_step, scf_iter, log_detail);
     orb_ops_->correct(current, elec_step, scf_iter, log_detail);
-    // Restore endpoint geometry, velocities and fields after propagation for density and band-energy evaluation.
+    // Select endpoint projectors, velocities and fields for band-energy evaluation.
     const ModuleBase::Vector3<double> &vecpot_ha = field.A_right_ha();
     td_hamilt.bind(veff, vecpot_ha, right);
 }

@@ -3,8 +3,6 @@
 #include "source_base/timer.h"
 #include "source_base/tool_quit.h"
 
-#include <cstdint>
-
 namespace hamilt
 {
 
@@ -14,7 +12,7 @@ TDNonlocalPW<T, Device>::TDNonlocalPW(
     const pseudopot_cell_vnl *ppcell_in,
     const UnitCell *ucell_in,
     const ModulePW::PW_Basis_K *wfc_basis,
-    const bool nonlocal_field)
+    const bool &nonlocal_field)
     : nonlocal_field_(nonlocal_field)
 {
     if (isk_in == nullptr || ppcell_in == nullptr || ucell_in == nullptr || wfc_basis == nullptr)
@@ -24,16 +22,11 @@ TDNonlocalPW<T, Device>::TDNonlocalPW(
 
     this->classname = "TDNonlocalPW";
     this->cal_type = calculation_type::pw_nonlocal;
-    this->isk = isk_in;
-    this->ppcell = ppcell_in;
-    this->ucell = ucell_in;
-    this->wfcpw = wfc_basis;
-}
-
-template <typename T, typename Device>
-TDNonlocalPW<T, Device>::~TDNonlocalPW()
-{
-    delmem_complex_op()(this->vkb_td);
+    this->isk_ = isk_in;
+    this->ppcell_ = ppcell_in;
+    this->ucell_ = ucell_in;
+    this->wfcpw_ = wfc_basis;
+    projectors_.reset(new NLProjPW<typename GetTypeReal<T>::type, Device>(*ucell_in, *wfc_basis, *ppcell_in));
 }
 
 template <typename T, typename Device>
@@ -43,17 +36,10 @@ void TDNonlocalPW<T, Device>::init(const int ik_in)
     this->ik = ik_in;
 
     // Refresh the shifted projectors when nonlocal projectors are present.
-    if (this->ppcell->nkb > 0 && this->wfcpw->npwk[ik_in] > 0)
+    if (this->ppcell_->nkb > 0 && this->wfcpw_->npwk[ik_in] > 0)
     {
-        // Allocate the time-dependent projector cache on first use.
-        if (this->vkb_td == nullptr)
-        {
-            const std::int64_t projector_elements = static_cast<std::int64_t>(this->ppcell->nkb) * this->wfcpw->npwk_max;
-            resmem_complex_op()(this->vkb_td, projector_elements, "TDNL::vkb_td");
-        }
-
-        // Generate projectors with the field and atomic velocities of the currently bound sample.
-        this->ppcell->getvnl(this->ctx, *this->ucell, this->ik, this->A_ha_, this->ion_vel_, this->vkb_td, this->wfcpw->npwk_max);
+        // Density correctors share the projectors of this physical sampling point.
+        this->vkb_td_ = projectors_->beta(ik_in);
     }
 
     if (this->next_op != nullptr)
@@ -74,16 +60,16 @@ void TDNonlocalPW<T, Device>::act(
     const bool is_first_node) const
 {
     this->workspace_.apply(
-        *this->ucell,
-        *this->ppcell,
-        *this->wfcpw,
-        this->isk[this->ik],
+        *this->ucell_,
+        *this->ppcell_,
+        *this->wfcpw_,
+        this->isk_[this->ik],
         nbands,
         nbasis,
         npol,
         ngk_ik,
         is_first_node,
-        this->vkb_td,
+        this->vkb_td_,
         tmpsi_in,
         tmhpsi);
 }

@@ -60,7 +60,7 @@ add_library(
 
 # Kept out of `cell` because it needs the plane-wave basis (planewave), which
 # the cell-only unit tests do not link.
-add_library(structure_factor OBJECT stru_fac.cpp stru_fac_k.cpp)
+add_library(structure_factor OBJECT stru_fac.cpp stru_fac_k.cpp atom_phase.cpp)
 
 if(ENABLE_COVERAGE)
   add_coverage(cell)

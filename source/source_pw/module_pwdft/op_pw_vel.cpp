@@ -255,7 +255,7 @@ void Velocity<FPTYPE, Device>::act(
 
     // 1. <\beta|\psi>
     const std::int64_t block = static_cast<std::int64_t>(this->ppcell->nkb) * n_npwx;
-    Complex *becp1_ = this->contraction_.project(vkb_, gradvkb_, psi0, npw, max_npw, this->ppcell->nkb, n_npwx, 3, 4);
+    Complex *becp1_ = this->contraction_.project(vkb_, gradvkb_, psi0, npw, max_npw, this->ppcell->nkb, n_npwx, 3, 4, nullptr);
     Complex *ps1_ = becp1_ + 4 * block;
     Complex *ps2_ = ps1_ + block;
 
@@ -266,7 +266,7 @@ void Velocity<FPTYPE, Device>::act(
     const Complex *gradvkb_d = gradvkb_;
 
     // deeq stores energies in Ry; velocity uses Hartree atomic units like p.
-    this->contraction_.contract(*this->ucell, *this->ppcell, this->isk[this->ik], n_npwx, npol, 3, 4, FPTYPE(0.5), *this->wfcpw, becp1_);
+    this->contraction_.contract(*this->ucell, *this->ppcell, this->isk[this->ik], n_npwx, npol, 3, 4, FPTYPE(0.5), *this->wfcpw, becp1_, false);
 
     if (npw == 0)
     {

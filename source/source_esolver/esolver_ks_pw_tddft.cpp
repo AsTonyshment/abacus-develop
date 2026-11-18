@@ -1,15 +1,15 @@
 #include "source_esolver/esolver_ks_pw_tddft.h"
 
 #include "source_base/constants.h"
-#include "source_base/global_function.h"
 #include "source_base/global_variable.h"
 #include "source_base/timer.h"
+#include "source_base/tool_quit.h"
+#include "source_base/tool_title.h"
 #include "source_cell/cell_tools.h"
 #include "source_estate/elecstate_pw.h"
 #include "source_estate/elecstate_tools.h"
 #include "source_estate/module_charge/chg_symm.h"
 #include "source_hamilt/hamilt_hs_adapter.h"
-#include "source_hamilt/module_ewald/h_ewald_pw.h"
 #include "source_hamilt/module_xc/xc_functional.h"
 #include "source_io/module_ctrl/ctrl_output_td_pw.h"
 #include "source_io/module_efield/td_vecpot_io.h"
@@ -22,7 +22,6 @@
 #include <algorithm>
 #include <iostream>
 #include <limits>
-#include <type_traits>
 
 namespace ModuleESolver
 {
@@ -60,47 +59,18 @@ void ESolver_KS_PW_TDDFT<T, Device>::before_all_runners(BaseCell &basecell, cons
         this->field_->set_A_samples(samples);
     }
 
-    // 2) Initialize the common PW data before checking the resolved XC functional and RT capabilities.
+    // 2) Initialize the common PW data (before checking the resolved XC functional and RT capabilities).
     ESolver_KS_PW<T, Device>::before_all_runners(ucell, inp);
 
     // The parent resolves the XC functional, including pseudopotential defaults.
     const int xc_type = XC_Functional::get_func_type();
     pw::check_td_input(inp, xc_type, this->general_exx_info_.cal_exx);
 
-    // 3) Prepare ionic operators and endpoint observables using the existing PW grids and charge storage.
-    const bool has_float = std::is_same<Real, float>::value;
-    ion_ops_.reset(new pw::TDIonPW(&ucell, &this->sf, this->Pgrid, *this->pw_rhod, &this->chr, this->locpp.numeric, has_float));
+    // 3) Prepare ionic operators, the propagator and accepted-state storage on the initialized PW grids.
+    this->init_td(&ucell, inp);
 
-    current_req_.charge_total = inp.out_current == 1;
-    current_req_.charge_per_k = current_req_.charge_total && inp.out_current_k;
-    current_req_.spin_current = inp.nspin == 4 && inp.td_out_spincur;
-    vel_.initialize(ucell, *this->pw_wfc, this->kv, this->ppcell);
-
-    if (inp.nspin == 4)
-    {
-        spin_.initialize(
-            ucell,
-            *this->pw_rhod,
-            *this->pw_wfc,
-            this->kv,
-            this->sf,
-            this->ppcell,
-            inp.td_out_mag,
-            inp.orbital_dir,
-            inp.onsite_radius,
-            inp.td_out_torque);
-    }
-
-    // 4) Attach the field to the potential and create the selected propagator and accepted-state storage.
-    this->pelec->pot->set_td_field_manager(this->field_);
-#ifdef __MPI
-    const hsolver::diag_comm_info comm(this->pw_wfc->pool_world, this->pw_wfc->poolrank, this->pw_wfc->poolnproc);
-#else
-    const hsolver::diag_comm_info comm(0, 1);
-#endif
-    const int npol = ucell.get_npol();
-    this->td_prop_ = pw::make_td_prop<T, Device>(*this->pw_wfc, inp, npol, this->kv.ik2iktot, comm, log_);
-    this->history_.prepare(*this->pelec->pot);
+    // 4) Initialize the requested endpoint observables.
+    this->init_obs(ucell, inp);
 
     const int rank = GlobalV::MY_RANK;
     const std::string &out_dir = PARAM.globalv.global_out_dir;
@@ -116,32 +86,37 @@ void ESolver_KS_PW_TDDFT<T, Device>::runner(BaseCell &basecell, const int istep)
     UnitCell &cell = static_cast<UnitCell &>(basecell);
 
     const int steps_per_md = this->inp_->estep_per_md;
+    const bool moving = unitcell::if_atoms_can_move(cell.atoms, cell.ntype);
 
     // 1) Establish the initial electronic state once through the common SCF driver and its after_scf hook.
     if (istep == 0)
     {
-        if (unitcell::if_atoms_can_move(cell.atoms, cell.ntype))
+        if (moving)
         {
-            ModuleBase::WARNING_QUIT("ESolver_KS_PW_TDDFT", "Fixed-ion MD scheduling requires movement flags 0 0 0.");
+            pw::check_td_coupled(*this->inp_);
         }
         ESolver_KS::runner(cell, 0);
-        if (this->inp_->mdp.md_nstep != 1)
+
+        if (moving || this->inp_->mdp.md_nstep != 1)
         {
             return;
         }
     }
 
-    // 2) Map this fixed-ion MD scheduling call to its inclusive range of electronic steps.
-    int first_step = (istep - 1) * steps_per_md + 1;
-    int last_step = istep * steps_per_md;
-    if (this->inp_->mdp.md_nstep == 1)
+    // 2) Ehrenfest currently requires estep_per_md=1, so each MD advance calls prop_step once.
+    if (moving)
     {
-        // A single MD call includes both initialization and the requested electronic steps.
-        first_step = 1;
-        last_step = steps_per_md;
+        const bool need_force = true;
+        this->prop_step(&cell, istep, nullptr, need_force);
+        return;
     }
 
-    // 3) Supply the accepted geometry at all operator and retry times, then advance the electronic steps.
+    // 3) Fixed ions allow estep_per_md=N, so this MD call schedules N electronic steps.
+    const int md_interval = std::max(istep, 1);
+    const int first_step = (md_interval - 1) * steps_per_md + 1;
+    const int last_step = md_interval * steps_per_md;
+
+    // 4) Use a constant path for all samples and let prop_path iterate over the scheduled electronic steps.
     const double dt = this->field_->dt_ha();
     const double left = (first_step - 1) * dt;
     const double right = last_step * dt;
@@ -149,15 +124,18 @@ void ESolver_KS_PW_TDDFT<T, Device>::runner(BaseCell &basecell, const int istep)
     const unitcell::IonicState &left_ions = this->history_.ions();
     const pw::TDIonPath ions(left_ions, left, right);
 
-    propagate(&cell, first_step, last_step, ions);
+    // MD requests a force after this runner call, at the last electronic endpoint.
+    const bool need_force = true;
+    prop_path(&cell, first_step, last_step, ions, need_force);
 }
 
 template <typename T, typename Device>
-void ESolver_KS_PW_TDDFT<T, Device>::propagate(
+void ESolver_KS_PW_TDDFT<T, Device>::prop_path(
     UnitCell *cell,
-    int first_step,
-    int last_step,
-    const pw::TDIonPath &ions)
+    const int &first_step,
+    const int &last_step,
+    const pw::TDIonPath &ions,
+    const bool &need_force)
 {
     // 1) Check that the requested path and step range can propagate the initialized electronic state.
     if (!ions.is_fixed())
@@ -176,46 +154,196 @@ void ESolver_KS_PW_TDDFT<T, Device>::propagate(
     const unitcell::IonicState &saved = this->history_.ions();
     ions.check(*cell, saved, time);
 
-    // 3) Advance one electronic step at a time; run_prop handles each step's trials and endpoint output.
+    // 3) Delegate each step of the supplied fixed or moving path to prop_step, including electronic retries and output.
     for (int step = first_step; step <= last_step; ++step)
     {
-        run_prop(cell, step, ions);
+        const bool end_force = need_force && step == last_step;
+        prop_step(cell, step, &ions, end_force);
     }
 }
 
 template <typename T, typename Device>
-bool ESolver_KS_PW_TDDFT<T, Device>::defer_iter_output(const int istep) const
-{
-    return istep > 0;
-}
-
-template <typename T, typename Device>
-int ESolver_KS_PW_TDDFT<T, Device>::scf_iter_limit(const int istep) const
-{
-    return istep > 0 ? this->inp_->td_scf_nmax : this->inp_->scf_nmax;
-}
-
-template <typename T, typename Device>
-bool ESolver_KS_PW_TDDFT<T, Device>::advance_interval(
+void ESolver_KS_PW_TDDFT<T, Device>::prop_step(
     UnitCell *cell,
-    int step,
-    int index,
-    int depth,
+    const int &step,
+    const pw::TDIonPath *prescribed,
+    const bool &need_force)
+{
+    ModuleBase::timer::start("ESolver_KS_PW_TDDFT", "prop_step");
+    const ModuleBase::TimePoint started = ModuleBase::get_time();
+
+    // 1) Read the accepted left state, predict the ionic endpoint and preserve its origin when needed.
+    // A null path selects Ehrenfest ionic self-consistency; a supplied path determines the ionic samples directly.
+    const bool coupled = prescribed == nullptr;
+    const unitcell::IonicState left = history_.ions();
+    ModuleBase::matrix left_accel;
+    const double dt = field_->dt_ha();
+    const int limit = coupled ? this->inp_->td_ion_nmax : 1;
+    const bool save_origin = coupled && limit > 1 && this->inp_->td_max_halvings > 0;
+    const bool direct_etrs = this->inp_->propagator == 2 && !this->inp_->td_nl_motion;
+    unitcell::IonicState trial_ions = left;
+    if (coupled)
+    {
+        left_accel = this->ion_accel().accel;
+        trial_ions = pw::predict_ions(left, left_accel, dt);
+        // Use the electronic step index to avoid cumulative roundoff in accepted ionic times.
+        trial_ions.t_pos = step * dt;
+        trial_ions.t_vel = trial_ions.t_pos;
+
+        // Preserve an immutable origin when later ionic trials can require repropagation.
+        if (save_origin)
+        {
+            ion_origin_.copy_from(history_);
+        }
+    }
+
+    // 2) Invalidate the old force after retaining the left acceleration, then prepare the full-step field.
+    endpoint_force_.reset();
+    this->before_scf(*cell, step);
+    if (this->inp_->vnl_in_h)
+    {
+        hamilt::HamiltPW<T, Device> &hamilt = *static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
+        hamilt.td_projectors().begin_step();
+    }
+    const elecstate::TDFieldState full = field_->field_state();
+
+    // 3) Propagate electrons along each trial path and iterate the coupled endpoint velocity.
+    bool conv = false;
+    IntervalStats retained;
+    ModuleBase::matrix ion_force;
+    double end_ewald = 0.0;
+    for (int iter = 1; iter <= limit; ++iter)
+    {
+        // 3.1) Start every ionic trial from the same original history and field with fresh statistics.
+        if (iter > 1 && save_origin)
+        {
+            history_.copy_from(ion_origin_);
+        }
+        retained = IntervalStats();
+
+        // 3.2) Select the prescribed path or construct a Hermite path from the trial endpoint velocity.
+        const bool need_derivs = (coupled || need_force) && this->inp_->td_nl_motion && this->inp_->vnl_in_h;
+        IntervalEnd interval;
+        const double *saved_ewald = iter > 1 ? &end_ewald : nullptr;
+        if (coupled)
+        {
+            ModuleIO::print_ion_trial(step, iter, limit, &log_, &std::cout);
+            const pw::TDIonPath path = pw::TDIonPath::hermite(left, trial_ions);
+            interval = advance_interval(cell, step, 0, 0, full, path, need_derivs, saved_ewald, &retained);
+        }
+        else
+        {
+            interval = advance_interval(cell, step, 0, 0, full, *prescribed, need_derivs, saved_ewald, &retained);
+        }
+
+        const bool elec_conv = interval.converged;
+        end_ewald = interval.ewald;
+
+        // 3.3) Restore the full-step field after internal electronic retries.
+        field_->bind_field(full);
+        conv = elec_conv;
+        if (!coupled)
+        {
+            break;
+        }
+
+        // 3.4) Evaluate endpoint forces and velocity-Verlet residuals to determine convergence and acceptance.
+        const ModuleBase::matrix *saved_ion = ion_force.nr == 0 ? nullptr : &ion_force;
+        const pw::IonForce force = cal_ion_force(*cell, saved_ion);
+        if (saved_ion == nullptr)
+        {
+            ion_force = force.forces.ion;
+        }
+        const double vel_res = pw::correct_ions(left, left_accel, force.dynamics.accel, dt, &trial_ions);
+
+        // Ionic convergence ends the outer correction even when the electronic iteration budget was exhausted.
+        // Unsplit ETRS without traveling projectors completes the Verlet kick without another electronic trial.
+        const bool ion_conv = (direct_etrs && retained.max_depth == 0) || vel_res <= this->inp_->td_ion_thr;
+        // A single propagation checks electronic convergence without imposing ionic self-consistency.
+        conv = elec_conv && (limit == 1 || ion_conv);
+        const bool accepted = ion_conv || iter == limit;
+        ModuleIO::print_td_coupled(
+            step,
+            iter,
+            limit,
+            retained.iters,
+            retained.residual,
+            vel_res,
+            this->inp_->td_ion_thr,
+            force.dynamics.residual,
+            force.dynamics.status,
+            conv,
+            accepted,
+            &log_,
+            &std::cout);
+
+        // 3.5) Finalize the corrected endpoint or reuse its velocity in the next trial path.
+        if (accepted)
+        {
+            this->correct_end(cell, trial_ions, force);
+            break;
+        }
+    }
+
+    if (this->inp_->vnl_in_h)
+    {
+        hamilt::HamiltPW<T, Device> &hamilt = *static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
+        hamilt.td_projectors().end_step();
+    }
+
+    // 4) Save the complete corrected endpoint once, then synchronize its displacement with MD.
+    const psi::Psi<T, Device> &current = *this->stp.template get_psi_t<T, Device>();
+    history_.save(current, *this->pelec, this->chr, right_ions_);
+    if (coupled)
+    {
+        if (!endpoint_force_)
+        {
+            ModuleBase::WARNING_QUIT("prop_step", "Missing force result for the accepted coupled endpoint.");
+        }
+        pw::store_ion_disp(left, right_ions_, cell);
+    }
+
+    // 5) Report retained statistics and original-endpoint observables, then store the convergence status.
+    hsolver::TDOrthStats orth;
+    orth.before = retained.before;
+    orth.after = retained.after;
+    this->td_prop_->orbitals().set_orth_stats(orth);
+    this->chr.save_rho_before_sum_band();
+    this->out_prop(*cell, step, conv);
+    const ModuleBase::TimePoint finished = ModuleBase::get_time();
+    const double duration = ModuleBase::get_duration(started, finished);
+    this->record_iteration(*cell, duration);
+    this->after_scf(*cell, step, conv);
+    this->conv_esolver = conv;
+
+    ModuleBase::timer::end("ESolver_KS_PW_TDDFT", "prop_step");
+}
+
+template <typename T, typename Device>
+typename ESolver_KS_PW_TDDFT<T, Device>::IntervalEnd ESolver_KS_PW_TDDFT<T, Device>::advance_interval(
+    UnitCell *cell,
+    const int &step,
+    const int &index,
+    const int &depth,
     const elecstate::TDFieldState &full,
     const pw::TDIonPath &ions,
-    hsolver::TDOrthStats *stats)
+    const bool &need_derivs,
+    const double *right_ewald,
+    IntervalStats *stats)
 {
     // 1) Start each retry subinterval from the latest accepted electronic state and bind its external field.
-    const int parts = 1 << depth;
-    if (depth > 0)
+    hamilt::HamiltPW<T, Device> *sample_hamilt = nullptr;
+    if (this->inp_->vnl_in_h)
     {
-        psi::Psi<T, Device> &current = *this->stp.template get_psi_t<T, Device>();
-        this->history_.restore(&current, this->pelec, &this->chr);
-        this->td_prop_->orbitals().reset_orth_stats();
-
-        const elecstate::TDFieldState trial = this->field_->subinterval(full, index, parts);
-        this->field_->bind_field(trial);
+        sample_hamilt = static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
     }
+    endpoint_.clear_sample(sample_hamilt);
+    const int parts = 1 << depth;
+    psi::Psi<T, Device> &wave = *this->stp.template get_psi_t<T, Device>();
+    this->history_.restore(&wave, this->pelec, &this->chr);
+    this->td_prop_->orbitals().reset_orth_stats();
+    const elecstate::TDFieldState trial = this->field_->subinterval(full, index, parts);
+    this->field_->bind_field(trial);
 
     // 2) Locate the method's ionic sample and the right endpoint using times derived from the original step.
     // CN uses midpoint ions; ETRS uses left-endpoint ions for its cached first half-step.
@@ -229,91 +357,74 @@ bool ESolver_KS_PW_TDDFT<T, Device>::advance_interval(
     ion_ops_->update_pot(right_ions_, this->pelec->pot);
     if (!ions.is_fixed() && !this->inp_->test_skip_ewald)
     {
-        this->pelec->f_en.ewald_energy = H_Ewald_pw::compute_ewald(*cell, this->pw_rhod, this->sf.strucFac, this->inp_->test_energy, log_);
+        // History restoration replaces energies, so always install the current endpoint's Ewald value.
+        if (right_ewald != nullptr)
+        {
+            this->pelec->f_en.ewald_energy = *right_ewald;
+        }
+        else
+        {
+            this->pelec->f_en.ewald_energy = ion_ops_->cal_ewald(this->inp_->test_energy, &log_);
+        }
     }
+    IntervalEnd result;
+    result.ewald = this->pelec->f_en.ewald_energy;
     this->prepare_init_hamilt(*cell);
 
     const double left_fs = left_ha * ModuleBase::AU_to_FS;
     const double right_fs = right_ha * ModuleBase::AU_to_FS;
-    const std::string interval_text = ModuleIO::print_td_trial(left_fs, right_fs, depth, &log_, &std::cout);
+    ModuleIO::print_td_trial(left_fs, right_fs, depth, &log_, &std::cout);
 
     // 4) Reset trial caches and iterate the endpoint density through the common SCF loop.
     // Each hamilt2rho_single call propagates from the accepted left state; iter_finish updates the endpoint potential.
     const int iter_limit = this->scf_iter_limit(step);
     this->td_prop_->begin_trial();
-    const bool converged = this->scf_loop(*cell, step, iter_limit);
+    const bool conv = this->scf_loop(*cell, step, iter_limit);
 
     // 5) Accept a converged trial or one at the subdivision limit; otherwise solve the two halves in order.
-    const bool accept_trial = converged || depth == this->inp_->td_max_halvings;
-    ModuleIO::print_td_result(this->niter, this->drho, converged, accept_trial, &log_);
-    if (!converged && depth < this->inp_->td_max_halvings)
+    const bool accept_trial = conv || depth == this->inp_->td_max_halvings;
+    ModuleIO::print_td_result(this->niter, this->drho, conv, accept_trial, &log_);
+    if (!conv && depth < this->inp_->td_max_halvings)
     {
-        ModuleIO::print_td_retry(interval_text, &std::cout);
+        ModuleIO::print_td_retry(left_fs, right_fs, &std::cout);
 
         const int next_depth = depth + 1;
         const int left_index = 2 * index;
         const int right_index = left_index + 1;
 
         // Accept the left half first so the right half starts from its updated electronic and ionic history.
-        const bool left_converged = advance_interval(cell, step, left_index, next_depth, full, ions, stats);
-        const bool right_converged = advance_interval(cell, step, right_index, next_depth, full, ions, stats);
-        return left_converged && right_converged;
+        const IntervalEnd left_end = advance_interval(cell, step, left_index, next_depth, full, ions, need_derivs, nullptr, stats);
+        const IntervalEnd right_end = advance_interval(cell, step, right_index, next_depth, full, ions, need_derivs, &result.ewald, stats);
+        result.converged = left_end.converged && right_end.converged;
+        return result;
     }
 
-    // 6) At the retry limit, rebuild consistent endpoint quantities from the final orbitals and continue propagation.
-    if (!converged)
+    // 6) Finalize each retained endpoint with its orbital density before saving it.
+    const bool final_sample = index + 1 == parts;
+    elecstate::ElecStatePW<T, Device> *estate = static_cast<elecstate::ElecStatePW<T, Device> *>(this->pelec);
+    pw::prep_td_rho(wave, estate, &this->chr, cell, *this->pw_rhod, conv, this->inp_->nspin, this->inp_->imp_sol);
+    if (final_sample)
     {
-        this->rebuild_end(cell);
+        const bool need_products = this->inp_->vnl_in_h;
+        this->finish_end(cell, need_products, need_derivs);
     }
 
-    // 7) Accumulate accepted orthogonality statistics and save electrons and ions at the same right endpoint.
-    // This history supplies the starting state for the next subinterval or electronic step.
+    // 7) Save intermediate history for retries; prop_step commits the corrected full-step endpoint.
     const hsolver::TDOrthStats &trial_stats = this->td_prop_->orbitals().orth_stats();
     stats->before = std::max(stats->before, trial_stats.before);
     stats->after = std::max(stats->after, trial_stats.after);
+    stats->residual = std::max(stats->residual, this->drho);
+    stats->iters += this->niter;
+    stats->max_depth = std::max(stats->max_depth, depth);
 
-    const psi::Psi<T, Device> *current = this->stp.template get_psi_t<T, Device>();
-    const bool save_retry = this->inp_->td_max_halvings > 0;
-    this->history_.save(*current, *this->pelec, this->chr, right_ions_, save_retry);
+    if (!final_sample)
+    {
+        const psi::Psi<T, Device> *current = this->stp.template get_psi_t<T, Device>();
+        this->history_.save(*current, *this->pelec, this->chr, right_ions_);
+    }
 
-    return converged;
-}
-
-template <typename T, typename Device>
-void ESolver_KS_PW_TDDFT<T, Device>::run_prop(UnitCell *cell, int step, const pw::TDIonPath &ions)
-{
-    ModuleBase::timer::start("ESolver_KS_PW_TDDFT", "run_prop");
-    const ModuleBase::TimePoint started = ModuleBase::get_time();
-
-    // 1) Prepare the external field and diagnostics for the full electronic step.
-    this->before_scf(*cell, step);
-    ModuleBase::GlobalFunc::DONE(log_, "INIT SCF");
-
-    // 2) Advance the full interval, allowing advance_interval to accept smaller subintervals when needed.
-    const elecstate::TDFieldState full = this->field_->field_state();
-    hsolver::TDOrthStats stats;
-    const bool converged = advance_interval(cell, step, 0, 0, full, ions, &stats);
-
-    // 3) Restore full-step field metadata and retain the statistics and density of the accepted endpoint.
-    this->field_->bind_field(full);
-    this->td_prop_->orbitals().set_orth_stats(stats);
-    this->chr.save_rho_before_sum_band();
-
-    // 4) Write density, orbital and field results once all accepted subintervals reach the full-step endpoint.
-    this->out_prop(*cell, step, converged);
-
-    const double duration = ModuleBase::get_duration(started, ModuleBase::get_time());
-    this->record_iteration(*cell, duration);
-
-    const int rank = GlobalV::MY_RANK;
-    const std::string &out_dir = PARAM.globalv.global_out_dir;
-    ModuleIO::out_td_field(*this->field_, out_dir, step, this->inp_->out_vecpot, this->inp_->out_efield, rank);
-
-    // 5) Finalize endpoint energies and observables, retaining the convergence status of the full step.
-    this->after_scf(*cell, step, converged);
-    this->conv_esolver = converged;
-
-    ModuleBase::timer::end("ESolver_KS_PW_TDDFT", "run_prop");
+    result.converged = conv;
+    return result;
 }
 
 template <typename T, typename Device>
@@ -328,6 +439,15 @@ void ESolver_KS_PW_TDDFT<T, Device>::before_scf(UnitCell &ucell, const int istep
     // During propagation, advance_interval applies the ionic samples required by each trial.
     if (istep == 0)
     {
+        // Clear endpoint forces and outer-trial snapshots before initializing a new trajectory.
+        endpoint_force_.reset();
+        hamilt::HamiltPW<T, Device> *old_hamilt = nullptr;
+        if (this->p_hamilt != nullptr && this->inp_->vnl_in_h)
+        {
+            old_hamilt = static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
+        }
+        endpoint_.clear_sample(old_hamilt);
+        ion_origin_ = pw::TDHistoryPW<T, Device>();
         ESolver_KS_PW<T, Device>::before_scf(ucell, istep);
         const unitcell::IonicState initial = unitcell::capture_ions(ucell, 0.0, 0.0);
         ion_ops_->bind(initial);
@@ -338,85 +458,15 @@ void ESolver_KS_PW_TDDFT<T, Device>::before_scf(UnitCell &ucell, const int istep
 }
 
 template <typename T, typename Device>
-void ESolver_KS_PW_TDDFT<T, Device>::prepare_init_hamilt(const UnitCell &ucell)
+bool ESolver_KS_PW_TDDFT<T, Device>::defer_iter_output(const int istep) const
 {
-    // 1) Cache the unshifted momentum bound of the fixed PW basis during initialization.
-    if (this->field_->current_step() == 0)
-    {
-        qmax_ = pw::td_momentum_bound(*this->pw_wfc, ucell.tpiba);
-    }
-
-    // 2) Cover the actual endpoint and propagation samples, including nuclear velocities in either gauge.
-    const ModuleBase::Vector3<double> &left = this->field_->A_left_ha();
-    const ModuleBase::Vector3<double> &right = this->field_->A_right_ha();
-    const double amax = this->inp_->td_vg_nl == 0 ? 0.0 : std::max({left.norm(), right.norm(), this->field_->A_prop_ha().norm()});
-    double vmax = 0.0;
-    const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(ucell, this->inp_->td_nl_motion);
-    for (const ModuleBase::Vector3<double> &v : vel)
-    {
-        vmax = std::max(vmax, v.norm());
-    }
-    if (this->inp_->td_nl_motion && this->history_.ready())
-    {
-        for (const unitcell::IonicAtom &atom : prop_ions_.atoms)
-        {
-            vmax = std::max(vmax, atom.velocity.norm());
-        }
-        for (const unitcell::IonicAtom &atom : this->history_.ions().atoms)
-        {
-            vmax = std::max(vmax, atom.velocity.norm());
-        }
-    }
-    // The triangle bound covers every sampled G+k+A-v_I without constructing a momentum grid for each atom.
-    const double bound = qmax_ + amax + vmax;
-    this->ppcell.ensure_vnl_range(ucell, bound);
-
-    // 3) Bind the complete endpoint operator, including file-supplied A(0), before initializing orbitals.
-    const Real *veff = this->pelec->pot->template get_veff_smooth_data<Real>();
-    hamilt::HamiltPW<T, Device> *hamilt_pw = static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
-    hamilt_pw->bind_td_state(veff, right, vel);
+    return istep > 0;
 }
 
 template <typename T, typename Device>
-void ESolver_KS_PW_TDDFT<T, Device>::prep_td_step(const int istep)
+int ESolver_KS_PW_TDDFT<T, Device>::scf_iter_limit(const int istep) const
 {
-    ModuleBase::timer::start("ESolver_KS_PW_TDDFT", "prep_td_step");
-
-    // 1) Reuse an already prepared step so repeated setup preserves its field sampling state.
-    if (this->field_->current_step() == istep)
-    {
-        ModuleBase::timer::end("ESolver_KS_PW_TDDFT", "prep_td_step");
-        return;
-    }
-
-    // 2) Sample the initial or length-gauge field at the endpoint; prepare a full interval for velocity-gauge propagation.
-    if (this->field_->gauge() == 0 || istep == 0)
-    {
-        this->field_->prepare_sample(istep);
-    }
-    else
-    {
-        const int interval_left = istep - 1;
-        this->field_->prepare_interval(interval_left, istep);
-    }
-
-    // 3) Report the prepared field; propagation field files are written by run_prop after interval acceptance.
-    if (this->field_->gauge() == 1)
-    {
-        const ModuleBase::Vector3<double> &A_right_ha = this->field_->A_right_ha();
-        ModuleBase::GlobalFunc::OUT(log_, "Cartesian vector potential Ax(t)", A_right_ha[0]);
-        ModuleBase::GlobalFunc::OUT(log_, "Cartesian vector potential Ay(t)", A_right_ha[1]);
-        ModuleBase::GlobalFunc::OUT(log_, "Cartesian vector potential Az(t)", A_right_ha[2]);
-    }
-
-    if (!this->defer_iter_output(istep))
-    {
-        const int rank = GlobalV::MY_RANK;
-        const std::string &out_dir = PARAM.globalv.global_out_dir;
-        ModuleIO::out_td_field(*this->field_, out_dir, istep, this->inp_->out_vecpot, this->inp_->out_efield, rank);
-    }
-
-    ModuleBase::timer::end("ESolver_KS_PW_TDDFT", "prep_td_step");
+    return istep > 0 ? this->inp_->td_scf_nmax : this->inp_->scf_nmax;
 }
 
 template <typename T, typename Device>
@@ -433,7 +483,7 @@ template <typename T, typename Device>
 void ESolver_KS_PW_TDDFT<T, Device>::iter_init(UnitCell &ucell, const int istep, const int iter)
 {
     int ionic_step = 0;
-    if (this->inp_->mdp.md_nstep > 1 && istep > 0)
+    if (istep > 0 && (this->inp_->mdp.md_nstep > 1 || unitcell::if_atoms_can_move(ucell.atoms, ucell.ntype)))
     {
         ionic_step = (istep - 1) / this->inp_->estep_per_md + 1;
     }
@@ -501,8 +551,7 @@ void ESolver_KS_PW_TDDFT<T, Device>::hamilt2rho_single(
     const ModuleBase::matrix &shape = potential.get_veff_smooth();
     const int nveff = shape.nr * shape.nc;
     const bool detailed = this->inp_->out_level == "ie";
-    this->td_prop_->evolve(
-        hamilt_pw, veff, nveff, this->history_, *this->field_, ion_ops_.get(), prop_ions_, right_ions_, current, istep, iter, detailed);
+    this->td_prop_->evolve(hamilt_pw, veff, nveff, this->history_, *this->field_, prop_ions_, right_ions_, current, istep, iter, detailed);
 
     // 3) Construct the trial endpoint density from the propagated orbitals with the initial occupations held fixed.
     elecstate::ElecStatePW<T, Device> *estate = static_cast<elecstate::ElecStatePW<T, Device> *>(this->pelec);
@@ -522,7 +571,14 @@ void ESolver_KS_PW_TDDFT<T, Device>::after_scf(UnitCell &ucell, const int istep,
 {
     const int rank = GlobalV::MY_RANK;
     const std::string &out_dir = PARAM.globalv.global_out_dir;
-    // 1) Finalize the initial state's orthogonality check and rebuild its endpoint quantities if SCF is unconverged.
+
+    // 1) Write the accepted propagation field; prep_td_step already writes the initial field.
+    if (istep > 0)
+    {
+        ModuleIO::out_td_field(*this->field_, out_dir, istep, this->inp_->out_vecpot, this->inp_->out_efield, rank);
+    }
+
+    // 2) Finalize the initial state's orthogonality check and rebuild its endpoint quantities if SCF is unconverged.
     if (istep == 0 && this->inp_->td_orthonormal == "none")
     {
         const psi::Psi<T, Device> *current = this->stp.template get_psi_t<T, Device>();
@@ -530,114 +586,49 @@ void ESolver_KS_PW_TDDFT<T, Device>::after_scf(UnitCell &ucell, const int istep,
     }
     if (!conv_esolver && istep == 0)
     {
-        this->rebuild_end(&ucell);
+        const psi::Psi<T, Device> &wave = *this->stp.template get_psi_t<T, Device>();
+        elecstate::ElecStatePW<T, Device> *estate = static_cast<elecstate::ElecStatePW<T, Device> *>(this->pelec);
+        const bool rho_ready = false;
+        pw::prep_td_rho(wave, estate, &this->chr, &ucell, *this->pw_rhod, rho_ready, this->inp_->nspin, this->inp_->imp_sol);
+        this->finish_end(&ucell, false, false);
     }
 
-    // 2) Bind endpoint potential, field and nuclear velocities for optional Eij output and common PW post-SCF processing.
+    // 3) Bind endpoint potential, field and nuclear velocities for optional Eij output and common PW post-SCF processing.
     hamilt::HamiltPW<T, Device> *hamilt = static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
     const Real *veff = this->pelec->pot->template get_veff_smooth_data<Real>();
     const ModuleBase::Vector3<double> &vecpot = this->field_->A_right_ha();
     const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(ucell, this->inp_->td_nl_motion);
-    hamilt->bind_td_state(veff, vecpot, vel);
+    const std::vector<ModuleBase::Vector3<double>> tau = unitcell::cell_positions(ucell);
+    hamilt->bind_td_state(veff, vecpot, vel, tau);
     this->out_eij(istep);
 
     ESolver_KS_PW<T, Device>::after_scf(ucell, istep, conv_esolver);
 
-    // 3) Update the energy passed to MD and write the complete endpoint energy diagnostics.
-    this->out_energy(ucell, istep, rank, out_dir);
+    // 4) Evaluate initial coupled dynamics once, including Pi for the endpoint energy.
+    if (istep == 0 && unitcell::if_atoms_can_move(ucell.atoms, ucell.ntype))
+    {
+        const pw::IonForce force = cal_ion_force(ucell, nullptr);
+        endpoint_force_.reset(new pw::IonForce(force));
+    }
 
-    // 4) Seed the accepted history after initial SCF; propagation endpoints are saved by advance_interval.
+    // 5) Prepare shared endpoint overlaps and update the MD energy before reporting observables.
+    ModuleBase::matrix ion_pi;
+    const hamilt::NLOrbData<typename GetTypeReal<T>::type, Device> *nl_orbs = this->prep_end_orbs(ucell, &ion_pi);
+    const pw::TDEnergy energy = this->cal_end_energy(ucell, ion_pi);
+    md_energy_ = energy.potential;
+    this->out_energy(energy, istep, rank, out_dir);
+
+    // 6) Seed initial history; prop_step saves subsequent endpoints after their velocity correction.
     if (istep == 0)
     {
         psi::Psi<T, Device> *current = this->stp.template get_psi_t<T, Device>();
         const unitcell::IonicState &initial_ions = ion_ops_->state();
-        const bool save_retry = this->inp_->td_max_halvings > 0;
-        this->history_.save(*current, *this->pelec, this->chr, initial_ions, save_retry);
+        this->history_.save(*current, *this->pelec, this->chr, initial_ions);
     }
 
-    // 5) Evaluate endpoint current, spin and conservation observables using the finalized electronic and ionic state.
-    this->out_td(ucell, istep, rank, out_dir);
-}
-
-template <typename T, typename Device>
-void ESolver_KS_PW_TDDFT<T, Device>::rebuild_end(UnitCell *cell)
-{
-    // Recompute endpoint density, potential and energy together when an iteration-limited state is accepted.
-    psi::Psi<T, Device> &current = *this->stp.template get_psi_t<T, Device>();
-    elecstate::ElecStatePW<T, Device> &estate = *static_cast<elecstate::ElecStatePW<T, Device> *>(this->pelec);
-    hamilt::HamiltPW<T, Device> &hamilt = *static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
-    const ModuleBase::Vector3<double> &vecpot = this->field_->A_right_ha();
-    const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(*cell, this->inp_->td_nl_motion);
-    pw::rebuild_td_end(
-        current,
-        estate,
-        this->chr,
-        *cell,
-        hamilt,
-        this->td_prop_->orbitals(),
-        *this->pw_wfc,
-        *this->pw_rhod,
-        vecpot,
-        vel,
-        this->inp_->nspin,
-        this->inp_->imp_sol,
-        this->inp_->sc_mag_switch,
-        this->inp_->dft_plus_u,
-        this->inp_->assume_isolated);
-}
-
-template <typename T, typename Device>
-double ESolver_KS_PW_TDDFT<T, Device>::cal_energy()
-{
-    return md_energy_;
-}
-
-template <typename T, typename Device>
-void ESolver_KS_PW_TDDFT<T, Device>::cal_force(BaseCell &basecell, ModuleBase::matrix &force)
-{
-    ModuleBase::timer::start("ESolver_KS_PW_TDDFT", "cal_force");
-
-    // 1) Reuse the PW position and direct field forces at the accepted RT-TDDFT endpoint.
-    ESolver_KS_PW<T, Device>::cal_force(basecell, force);
-
-    const UnitCell &cell = static_cast<const UnitCell &>(basecell);
-    ModuleBase::matrix hess(cell.nat, 6);
-    ModuleBase::matrix rate(cell.nat, 3);
-    if (this->inp_->td_nl_motion && this->inp_->vnl_in_h)
-    {
-        // 2) Bind the propagated Hamiltonian independently of the position-force coupling selected by td_vg_nl.
-        hamilt::HamiltPW<T, Device> &hamilt = *static_cast<hamilt::HamiltPW<T, Device> *>(this->p_hamilt);
-        const Real *veff = this->pelec->pot->template get_veff_smooth_data<Real>();
-        const ModuleBase::Vector3<double> &a = this->field_->A_right_ha();
-        ModuleBase::Vector3<double> nl_a{0.0, 0.0, 0.0};
-        ModuleBase::Vector3<double> adot{0.0, 0.0, 0.0};
-        if (this->field_->gauge() == 1 && this->inp_->td_vg_nl != 0)
-        {
-            nl_a = a;
-            adot = this->field_->efield_ha() * -1.0;
-        }
-        const std::vector<ModuleBase::Vector3<double>> vel = pw::td_ion_vel(cell, true);
-        hamilt.bind_td_state(veff, a, vel);
-        hamilt::HamiltHSOperator<T, Device> op(&hamilt, this->pw_wfc);
-        const psi::Psi<T, Device> &wave = *this->stp.template get_psi_t<T, Device>();
-        pi_calc_.cal_pi_derivs(cell, *this->pw_wfc, this->kv, &this->ppcell, wave, this->pelec->wg, nl_a, adot, vel, &op, &hess, &rate);
-    }
-
-    // 3) Solve free ionic directions in Hartree units and return the physical force in the existing Ry/Bohr convention.
-    ModuleBase::matrix force_ha(force);
-    force_ha *= 0.5;
-    ion_accel_ = pw::cal_ion_acc(cell, force_ha, hess, rate);
-    // Add dPi/dt to the returned RT-TDDFT force while keeping constraint reactions available as a separate result.
-    for (int ia = 0; ia < cell.nat; ++ia)
-    {
-        for (int d = 0; d < 3; ++d)
-        {
-            force(ia, d) += 2.0 * ion_accel_.dpi(ia, d);
-        }
-    }
-    ModuleIO::out_ion_force(cell, ion_accel_, force, this->inp_->td_out_stat, GlobalV::MY_RANK, log_);
-
-    ModuleBase::timer::end("ESolver_KS_PW_TDDFT", "cal_force");
+    // 7) Pass the prepared overlaps explicitly to current and spin sampling, then report conservation.
+    this->out_curr_spin(ucell, nl_orbs, istep, rank, out_dir);
+    this->out_conserv(ucell, istep);
 }
 
 template class ESolver_KS_PW_TDDFT<std::complex<float>, base_device::DEVICE_CPU>;

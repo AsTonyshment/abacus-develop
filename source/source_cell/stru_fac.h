@@ -14,6 +14,9 @@ class Structure_Factor
     ~Structure_Factor();
     void set(const ModulePW::PW_Basis *rho_basis_in, const int &nbspline_in);
 
+    /// Return the fixed density grid used by atomic translation phases.
+    const ModulePW::PW_Basis &phase_grid() const { return *rho_basis; }
+
     //===============================================
     // Part 4: G vectors in reciprocal FFT box
     //===============================================

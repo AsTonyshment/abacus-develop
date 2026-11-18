@@ -1,4 +1,5 @@
 #include "force_pw.h"
+#include "source_pw/module_pwdft/force_result.h"
 
 #include "source_base/complexmatrix.h"
 #include "source_base/global_variable.h"
@@ -17,7 +18,6 @@
 #include "source_hamilt/module_ewald/h_ewald_pw.h"
 #include "source_hamilt/module_surchem/surchem.h"
 #include "source_hamilt/module_vdw/vdw.h"
-#include "source_io/module_output/output_log.h"
 #include "source_io/module_parameter/parameter.h"
 #include "source_pw/module_pwdft/kernels/force_op.h"
 
@@ -27,17 +27,19 @@
 
 template <typename FPTYPE, typename Device>
 void Forces<FPTYPE, Device>::cal_force(
+    const hamilt::NLOrbData<FPTYPE, Device> *nl_orbs,
+    const ModuleBase::matrix *ion_force,
     const std::string &esolver_type,
     const ModuleBase::Vector3<double> &nonlocal_a,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
     const ModuleBase::Vector3<double> &electric,
-    const int nspin,
-    const bool domag,
-    const bool domag_z,
-    const int gga_grad,
-    const bool use_onsite_projection,
+    const int &nspin,
+    const bool &domag,
+    const bool &domag_z,
+    const int &gga_grad,
+    const bool &use_onsite_projection,
     UnitCell &ucell,
-    ModuleBase::matrix &force,
+    PWForceResult *result,
     const vdw::VdwResult *vdw_result,
     const elecstate::ElecState &elec,
     const ModulePW::PW_Basis *const rho_basis,
@@ -53,32 +55,46 @@ void Forces<FPTYPE, Device>::cal_force(
 {
     ModuleBase::timer::start("Forces", "cal_force");
     ModuleBase::TITLE("Forces", "init");
-    std::ofstream &running = GlobalV::ofs_running;
     this->device = base_device::get_device_type(this->ctx);
     const ModuleBase::matrix &wg = elec.wg;
     const ModuleBase::matrix &ekb = elec.ekb;
     const Charge *const chr = elec.charge;
-    force.create(nat, 3);
-
-    ModuleBase::matrix forcelc(nat, 3);
-    ModuleBase::matrix forceion(nat, 3);
-    ModuleBase::matrix forcecc(nat, 3);
-    ModuleBase::matrix forcenl(nat, 3);
-    ModuleBase::matrix forcescc(nat, 3);
-    ModuleBase::matrix forceonsite(nat, 3);
+    *result = PWForceResult();
+    ModuleBase::matrix &forcelc = result->local;
+    ModuleBase::matrix &forceion = result->ion;
+    ModuleBase::matrix &forcecc = result->core;
+    ModuleBase::matrix &forcenl = result->nonlocal;
+    ModuleBase::matrix &forcescc = result->scc;
+    ModuleBase::matrix &forceonsite = result->onsite;
+    forcelc.create(nat, 3);
+    forceion.create(nat, 3);
+    forcecc.create(nat, 3);
+    forcenl.create(nat, 3);
+    forcescc.create(nat, 3);
+    if (use_onsite_projection)
+    {
+        forceonsite.create(nat, 3);
+    }
 
     // Force due to local ionic potential
     this->cal_force_loc(ucell, forcelc, rho_basis, locpp->vloc, chr);
 
     // Ewald
-    this->cal_force_ew(ucell, forceion, rho_basis, p_sf);
+    if (ion_force != nullptr)
+    {
+        forceion = *ion_force;
+    }
+    else
+    {
+        this->cal_force_ew(ucell, forceion, rho_basis, p_sf);
+    }
 
     // Force due to nonlocal part of pseudopotential
     if (wfc_basis != nullptr)
     {
 
         this->npwx = wfc_basis->npwk_max;
-        Forces::cal_force_nl(forcenl, nonlocal_a, ion_vel, wg, ekb, pkv, wfc_basis, p_sf, *p_nlpp, ucell, psi_in);
+        Forces::cal_force_nl(nl_orbs, forcenl, nonlocal_a, ion_vel, wg, ekb, pkv, wfc_basis, p_sf, *p_nlpp, ucell, psi_in);
 
         if (PARAM.globalv.use_uspp)
         {
@@ -103,10 +119,10 @@ void Forces<FPTYPE, Device>::cal_force(
         this->cal_force_scc(forcescc, rho_basis, elec.vnew, elec.vnew_exist, locpp->numeric, ucell);
     }
 
-    ModuleBase::matrix force_vdw;
-    force_vdw.create(nat, 3);
+    ModuleBase::matrix &force_vdw = result->vdw;
     if (vdw_result != nullptr)
     {
+        force_vdw.create(nat, 3);
         if (!vdw_result->has_force || vdw_result->force.size() != static_cast<std::size_t>(this->nat))
         {
             ModuleBase::WARNING_QUIT("Forces::cal_force", "The cached vdW force is unavailable or has an invalid size.");
@@ -117,44 +133,34 @@ void Forces<FPTYPE, Device>::cal_force(
             force_vdw(iat, 1) = vdw_result->force[iat].y;
             force_vdw(iat, 2) = vdw_result->force[iat].z;
         }
-        if (PARAM.inp.test_force)
-        {
-            ModuleIO::print_force(running, ucell, "VDW      FORCE (Ry/Bohr)", force_vdw);
-        }
     }
 
     // RT-TDDFT includes the direct ionic electric-field force in both gauges.
-    ModuleBase::matrix force_td(this->nat, 3);
+    ModuleBase::matrix &force_td = result->field;
+    force_td.create(nat, 3);
     if (esolver_type == "tddft")
     {
         elecstate::H_TDDFT_pw::compute_force(ucell, electric, force_td);
     }
 
-    ModuleBase::matrix force_e;
+    ModuleBase::matrix &force_e = result->static_field;
     if (PARAM.inp.efield_flag)
     {
         force_e.create(this->nat, 3);
         elecstate::Efield::compute_force(ucell, force_e);
-        if (PARAM.inp.test_force)
-        {
-            ModuleIO::print_force(running, ucell, "EFIELD      FORCE (Ry/Bohr)", force_e);
-        }
     }
 
-    ModuleBase::matrix force_gate;
+    ModuleBase::matrix &force_gate = result->gate;
     if (PARAM.inp.gate_flag)
     {
         force_gate.create(this->nat, 3);
         elecstate::Gatefield::compute_force(ucell, force_gate);
-        if (PARAM.inp.test_force)
-        {
-            ModuleIO::print_force(running, ucell, "GATEFIELD      FORCE (Ry/Bohr)", force_gate);
-        }
     }
 
     const int solvation_model = PARAM.inp.imp_sol;
-    ModuleBase::matrix forcesol;
-    ModuleBase::matrix forcepcc(this->nat, 3);
+    ModuleBase::matrix &forcesol = result->solvent;
+    ModuleBase::matrix &forcepcc = result->pcc;
+    forcepcc.create(nat, 3);
     elec.pot->add_pcc_force(ucell, forcepcc);
     if (solvation_model != 0)
     {
@@ -167,108 +173,69 @@ void Forces<FPTYPE, Device>::cal_force(
         {
             elec.pot->sum_sol_force(ucell, forcesol);
         }
-        if (PARAM.inp.test_force)
-        {
-            ModuleIO::print_force(running, ucell, "IMP_SOL      FORCE (Ry/Bohr)", forcesol);
-        }
     }
 
-    // sum all force terms into the total force
-    int iat = 0;
-    for (int ipol = 0; ipol < 3; ipol++)
-    {
-        iat = 0;
-        for (int it = 0; it < ucell.ntype; it++)
-        {
-            for (int ia = 0; ia < ucell.atoms[it].na; ia++)
-            {
-                force(iat, ipol) = forcelc(iat, ipol) + forceion(iat, ipol) + forcenl(iat, ipol) + forcecc(iat, ipol) +
-                                   forcescc(iat, ipol) + forcepcc(iat, ipol) + force_td(iat, ipol);
+    result->shifted = !(PARAM.inp.gate_flag || PARAM.inp.efield_flag || esolver_type == "tddft");
+    this->sum_force(ucell, p_symm, result);
 
-                if (vdw_result != nullptr) // linpz and jiyy added vdw force, modified by zhengdy
-                {
-                    force(iat, ipol) += force_vdw(iat, ipol);
-                }
-
-                if (PARAM.inp.efield_flag)
-                {
-                    force(iat, ipol) = force(iat, ipol) + force_e(iat, ipol);
-                }
-
-                if (PARAM.inp.gate_flag)
-                {
-                    force(iat, ipol) = force(iat, ipol) + force_gate(iat, ipol);
-                }
-
-                if (solvation_model != 0)
-                {
-                    force(iat, ipol) = force(iat, ipol) + forcesol(iat, ipol);
-                }
-
-                if (use_onsite_projection)
-                {
-                    force(iat, ipol) += forceonsite(iat, ipol);
-                }
-
-                iat++;
-            }
-        }
-    }
-
-    // RT-TDDFT retains the ionic net force to describe momentum exchange with electrons and the field.
-    if (PARAM.inp.gate_flag || PARAM.inp.efield_flag || esolver_type == "tddft")
-    {
-        running << " Notice: Atomic forces are not shifted for gate fields, electric fields, or RT-TDDFT!" << std::endl;
-    }
-    else
-    {
-        ModuleBase::remove_net_force(this->nat, force);
-    }
-
-    if (ModuleSymmetry::Symmetry::symm_flag == 1)
-    {
-        ModuleSymmetry::symmetrize_force_cartesian(p_symm, this->nat, ucell.a1, ucell.a2, ucell.a3, force);
-    }
-
-    running << std::setiosflags(std::ios::fixed) << std::setprecision(6) << std::endl;
-
-    // output force in unit eV/Angstrom
-    running << std::endl;
-
-    if (PARAM.inp.test_force)
-    {
-        ModuleIO::print_force(running, ucell, "LOCAL    FORCE (eV/Angstrom)", forcelc, false);
-        ModuleIO::print_force(running, ucell, "NONLOCAL FORCE (eV/Angstrom)", forcenl, false);
-        ModuleIO::print_force(running, ucell, "NLCC     FORCE (eV/Angstrom)", forcecc, false);
-        ModuleIO::print_force(running, ucell, "ION      FORCE (eV/Angstrom)", forceion, false);
-        ModuleIO::print_force(running, ucell, "SCC      FORCE (eV/Angstrom)", forcescc, false);
-
-        if (esolver_type == "tddft")
-        {
-            ModuleIO::print_force(running, ucell, "RT FIELD FORCE (eV/Angstrom)", force_td, false);
-        }
-        if (PARAM.inp.efield_flag)
-        {
-            ModuleIO::print_force(running, ucell, "EFIELD   FORCE (eV/Angstrom)", force_e, false);
-        }
-        if (PARAM.inp.gate_flag)
-        {
-            ModuleIO::print_force(running, ucell, "GATEFIELD   FORCE (eV/Angstrom)", force_gate, false);
-        }
-        if (solvation_model != 0)
-        {
-            ModuleIO::print_force(running, ucell, "IMP_SOL   FORCE (eV/Angstrom)", forcesol, false);
-        }
-        if (use_onsite_projection)
-        {
-            ModuleIO::print_force(running, ucell, "ONSITE_PROJ    FORCE (eV/Angstrom)", forceonsite, false);
-        }
-    }
-    // The RT-TDDFT solver adds the nuclear velocity derivative before printing its complete force.
-    const std::string force_label = esolver_type == "tddft" ? "POSITION + FIELD FORCE (eV/Angstrom)" : "TOTAL-FORCE (eV/Angstrom)";
-    ModuleIO::print_force(running, ucell, force_label, force, false);
     ModuleBase::timer::end("Forces", "cal_force");
     return;
+}
+
+
+template <typename FPTYPE, typename Device>
+void Forces<FPTYPE, Device>::sum_force(
+    const UnitCell &cell, ModuleSymmetry::Symmetry *symm, PWForceResult *result)
+{
+    // Reassemble from physical contributions, before adding any RT velocity force.
+    const ModuleBase::matrix *terms[] = {
+        &result->local, &result->ion, &result->nonlocal, &result->core, &result->scc,
+        &result->pcc, &result->field, &result->vdw, &result->static_field,
+        &result->gate, &result->solvent, &result->onsite};
+    result->total.create(nat, 3);
+    for (const ModuleBase::matrix *term : terms)
+    {
+        if (term->nr != 0)
+        {
+            if (term->nr != nat || term->nc != 3)
+            {
+                ModuleBase::WARNING_QUIT("Forces::sum_force", "Invalid force contribution dimensions.");
+            }
+            result->total += *term;
+        }
+    }
+    if (result->shifted)
+    {
+        ModuleBase::remove_net_force(nat, result->total);
+    }
+    if (ModuleSymmetry::Symmetry::symm_flag == 1)
+    {
+        ModuleSymmetry::symmetrize_force_cartesian(symm, nat, cell.a1, cell.a2, cell.a3, result->total);
+    }
+}
+
+template <typename FPTYPE, typename Device>
+void Forces<FPTYPE, Device>::update_nl_force(
+    const hamilt::NLOrbData<FPTYPE, Device> *nl_orbs,
+    const ModuleBase::Vector3<double> &nonlocal_a,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+    const elecstate::ElecState &elec,
+    K_Vectors *kv,
+    ModulePW::PW_Basis_K *basis,
+    Structure_Factor *sf,
+    const pseudopot_cell_vnl &pp,
+    UnitCell &cell,
+    const psi::Psi<std::complex<FPTYPE>, Device> *wave,
+    PWForceResult *result)
+{
+    ModuleBase::timer::start("Forces", "update_nl_force");
+    this->device = base_device::get_device_type(this->ctx);
+    this->npwx = basis->npwk_max;
+    result->nonlocal.create(nat, 3);
+    this->cal_force_nl(nl_orbs, result->nonlocal, nonlocal_a, ion_vel,
+                       elec.wg, elec.ekb, kv, basis, sf, pp, cell, wave);
+    this->sum_force(cell, &cell.symm, result);
+    ModuleBase::timer::end("Forces", "update_nl_force");
 }
 
 template <typename FPTYPE, typename Device>

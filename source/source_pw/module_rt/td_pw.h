@@ -2,6 +2,7 @@
 #define TD_PW_H
 
 #include "source_basis/module_pw/pw_basis_k.h"
+#include "source_cell/ionic_state.h"
 #include "source_cell/unitcell.h"
 #include "source_io/module_parameter/input_parameter.h"
 
@@ -13,9 +14,23 @@ void check_td_input(const Input_para &input, int xc_type, bool cal_exx);
 
 /** @brief Validate terms requiring geometry refresh for a moving ionic path. */
 void check_td_ions(const Input_para &input);
+/** @brief Validate the single-interval NVE coupling controls. */
+void check_td_coupled(const Input_para &input);
 
 /** @brief Return the global unshifted momentum bound after updating the distributed basis. */
 double td_momentum_bound(const ModulePW::PW_Basis_K &basis, const double tpiba);
+
+/** @brief Bound all sampled projector momenta; sample_vel enables the propagation and saved ionic velocities. */
+double td_sample_bound(
+    const double &qmax,
+    const ModuleBase::Vector3<double> &a_left,
+    const ModuleBase::Vector3<double> &a_right,
+    const ModuleBase::Vector3<double> &a_prop,
+    const bool &shift_a,
+    const std::vector<ModuleBase::Vector3<double>> &vel,
+    const unitcell::IonicState &prop,
+    const unitcell::IonicState &left,
+    const bool &sample_vel);
 
 /** @brief Extract RT-TDDFT nuclear velocities in type-major order and Hartree units; empty selects position-dependent pseudopotentials. */
 std::vector<ModuleBase::Vector3<double>> td_ion_vel(const UnitCell &cell, bool motion);

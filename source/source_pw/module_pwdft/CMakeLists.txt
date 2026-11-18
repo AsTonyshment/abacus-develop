@@ -9,6 +9,8 @@ list(
   projector_gradient.cpp
   velocity_workspace.cpp
   nonlocal_workspace.cpp
+  nl_proj_pw.cpp
+  nl_orb_data.cpp
   op_pw_nl.cpp
   op_pw_meta.cpp
   op_pw_vel.cpp

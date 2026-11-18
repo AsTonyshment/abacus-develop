@@ -10,7 +10,7 @@
 
 namespace unitcell
 {
-/** @brief Stable type-major atom identity and physical Cartesian data. */
+//! Stable type-major atom identity and physical Cartesian data.
 struct IonicAtom
 {
     int id = 0;
@@ -23,7 +23,7 @@ struct IonicAtom
     ModuleBase::Vector3<double> disp;     ///< Unwrapped MD displacement in Bohr.
 };
 
-/** @brief An ionic sample; MD drift positions and kick velocities have separate times. */
+//! An ionic sample; MD drift positions and kick velocities have separate times.
 struct IonicState
 {
     double t_pos = 0.0;
@@ -33,8 +33,12 @@ struct IonicState
     std::vector<IonicAtom> atoms;
 };
 
-// Record position and velocity times in Hartree atomic units to preserve the MD integrator's sampling times.
+//! Record position and velocity times in Hartree atomic units to preserve the MD integrator's sampling times.
 IonicState capture_ions(const UnitCell &cell, double t_pos, double t_vel);
+//! Cartesian positions in units of lat0, ordered by atom type.
+std::vector<ModuleBase::Vector3<double>> cell_positions(const UnitCell &cell);
+//! Compare sampled Cartesian positions without allocating a cell snapshot.
+bool same_positions(const UnitCell &cell, const std::vector<ModuleBase::Vector3<double>> &positions);
 } // namespace unitcell
 
 #endif

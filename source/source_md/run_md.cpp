@@ -7,6 +7,7 @@
 #include "source_base/parallel_cell.h"
 #include "source_cell/mdcell_reader.h"
 #include "source_cell/mdcell.h"
+#include "source_cell/cell_tools.h"
 #include "source_cell/dom_decomp.h"
 #include "source_io/module_parameter/parameter.h"
 #include "fire.h"
@@ -114,6 +115,11 @@ void md_line(MDCell& mdcell,
     const MD_para& mdp = param_in.mdp;
     const bool cal_stress = param_in.inp.cal_stress;
     const bool init_vel = param_in.inp.init_vel;
+
+    // PW RT-TDDFT uses Ehrenfest dynamics when at least one ionic coordinate can move.
+    const bool coupled = mdcell.has_backing_unitcell() && param_in.inp.basis_type == "pw" && param_in.inp.esolver_type == "tddft" &&
+                         unitcell::if_atoms_can_move(mdcell.backing_unitcell().atoms, mdcell.backing_unitcell().ntype);
+
     const int my_rank = param_in.globalv.myrank;
     if (param_in.mdp.md_type == "fire")
     {
@@ -177,13 +183,6 @@ void md_line(MDCell& mdcell,
         }
     };
 
-    /// Effective ionic-step output frequency for STRU and other per-step
-    /// output files. Prefer out_freq_ion; fall back to md_restartfreq for
-    /// backward compatibility when out_freq_ion is not set (0).
-    const int eff_output_freq = (param_in.inp.out_freq_ion > 0)
-                                    ? param_in.inp.out_freq_ion
-                                    : param_in.mdp.md_restartfreq;
-
     /// Restart-file cadence is independent of the output cadence so that
     /// out_freq_ion and md_restartfreq can be set to different values.
     const int restart_freq = param_in.mdp.md_restartfreq;
@@ -208,8 +207,9 @@ void md_line(MDCell& mdcell,
         }
     }
 
-    /// md cycle, mohan update 2026-01-04, change '<=' to '<'
-    while ((mdrun->step_ + mdrun->step_rst_) < param_in.mdp.md_nstep && !mdrun->stop)
+    // A single coupled interval has two MD nodes: initialization and its propagated endpoint.
+    const int md_nodes = coupled && mdp.md_nstep == 1 ? 2 : mdp.md_nstep;
+    while ((mdrun->step_ + mdrun->step_rst_) < md_nodes && !mdrun->stop)
     {
         const int md_step = mdrun->step_ + mdrun->step_rst_;
         bool print_thermo = param_in.mdp.md_thermo_freq > 0
@@ -223,7 +223,22 @@ void md_line(MDCell& mdcell,
         }
 #endif
 
-        if (mdrun->step_ == 0)
+        // The PW RT-TDDFT Ehrenfest solver advances ions together with electrons,
+        // so MD skips its own Verlet half-steps.
+        if (coupled)
+        {
+            if (print_thermo)
+            {
+                const int stress_step = 0;
+                const int force_step = 0;
+                const int printed_step = md_step + 1;
+                ModuleIO::print_screen(stress_step, force_step, printed_step);
+            }
+
+            // The coupled solver advances both subsystems before MD updates its thermodynamic quantities.
+            MD_func::coupled_step(p_esolver, mdrun->step_, &mdcell, &mdrun->potential);
+        }
+        else if (mdrun->step_ == 0)
         {
             mdrun->setup(p_esolver, param_in.globalv.global_readin_dir, decomp);
 
@@ -324,7 +339,6 @@ void md_line(MDCell& mdcell,
         }
 
         const int current_step = mdrun->step_ + mdrun->step_rst_;
-        const bool do_output_step = is_cadence_step(current_step, eff_output_freq);
         const bool do_restart_step = is_cadence_step(current_step, restart_freq);
         const bool write_any_frame = is_frame_write_step(current_step,
                                                          param_in.inp.out_freq_ion,

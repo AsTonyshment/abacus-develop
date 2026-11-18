@@ -7,6 +7,7 @@ list(
   esolver_ks_pw.cpp
   esolver_ks_pw_tddft.cpp
   pw_td_obs.cpp
+  pw_td_state.cpp
   esolver_ks_lcaopw.cpp
   esolver_sdft_pw.cpp
   esolver_forcefields.cpp

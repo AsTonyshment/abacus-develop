@@ -28,6 +28,12 @@ class ProjectorGradient
     void reserve(ct::Tensor *tensor, const int64_t count);
 
   public:
+    /** @brief Evaluate derivatives with explicitly sampled device phases. */
+    void cal_sample(pseudopot_cell_vnl *pp, const UnitCell &cell, const ModulePW::PW_Basis_K &basis,
+                    const int &ik, const ModuleBase::Vector3<double> &a,
+                    const std::vector<ModuleBase::Vector3<double>> &vel, const int &order,
+                    const Complex *sk, Complex *output);
+
     /** @brief Evaluate momentum derivatives at G+k+A-v_I for the current operator.
      * @param ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units; non-RT callers pass an empty vector.
      * @param order One returns x,y,z; two returns x,y,z,xx,xy,xz,yy,yz,zz for RT-TDDFT inertia.
@@ -36,10 +42,10 @@ class ProjectorGradient
         pseudopot_cell_vnl *pp,
         const UnitCell &cell,
         const ModulePW::PW_Basis_K &basis,
-        const int ik,
-        const ModuleBase::Vector3<double> &A,
+        const int &ik,
+        const ModuleBase::Vector3<double> &a,
         const std::vector<ModuleBase::Vector3<double>> &ion_vel,
-        int order,
+        const int &order,
         Complex *output);
 };
 } // namespace hamilt

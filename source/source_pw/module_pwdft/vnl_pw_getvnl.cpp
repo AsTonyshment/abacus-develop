@@ -39,15 +39,35 @@ Value *reserve_vnl_buffer(ct::Tensor &buffer, const std::int64_t count)
  */
 template <typename FPTYPE, typename Device>
 void pseudopot_cell_vnl::getvnl(
+    Device *ctx, const UnitCell &ucell, const int &ik,
+    const ModuleBase::Vector3<double> &vecpot,
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+    std::complex<FPTYPE> *vkb_in, const int lead_dim) const
+{
+    ModuleBase::timer::start("pp_cell_vnl", "getvnl");
+    if (this->lmaxkb >= 0 && this->wfcpw->npwk[ik] > 0)
+    {
+        const int precision = std::is_same<FPTYPE, float>::value ? 0 : 1;
+        const int64_t size = static_cast<int64_t>(ucell.nat) * this->wfcpw->npwk[ik];
+        std::complex<FPTYPE> *sk = reserve_vnl_buffer<std::complex<FPTYPE>, Device>(this->vnl_structure_[precision], size);
+        this->psf->get_sk(ctx, ik, this->wfcpw, sk);
+        build_vnl(ctx, ucell, ik, vecpot, ion_vel, sk, vkb_in, lead_dim);
+    }
+    ModuleBase::timer::end("pp_cell_vnl", "getvnl");
+}
+
+template <typename FPTYPE, typename Device>
+void pseudopot_cell_vnl::build_vnl(
     Device *ctx,
     const UnitCell &ucell,
     const int &ik,
     const ModuleBase::Vector3<double> &vecpot,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+    const std::complex<FPTYPE> *structure_factor,
     std::complex<FPTYPE> *vkb_in,
-    const int lead_dim) const
+    const int &lead_dim) const
 {
-    ModuleBase::timer::start("pp_cell_vnl", "getvnl");
+    ModuleBase::timer::start("pp_cell_vnl", "build_vnl");
 
     using cal_vnl_op = hamilt::cal_vnl_op<FPTYPE, Device>;
     using syncmem_int_op = base_device::memory::synchronize_memory_op<int, Device, base_device::DEVICE_CPU>;
@@ -56,7 +76,7 @@ void pseudopot_cell_vnl::getvnl(
 
     if (this->lmaxkb < 0 || this->wfcpw->npwk[ik] == 0)
     {
-        ModuleBase::timer::end("pp_cell_vnl", "getvnl");
+        ModuleBase::timer::end("pp_cell_vnl", "build_vnl");
         return;
     }
 
@@ -121,10 +141,6 @@ void pseudopot_cell_vnl::getvnl(
         }
     }
 
-    const std::int64_t structure_elements = static_cast<std::int64_t>(ucell.nat) * npw;
-    std::complex<FPTYPE> *structure_factor =
-        reserve_vnl_buffer<std::complex<FPTYPE>, Device>(this->vnl_structure_[precision], structure_elements);
-    this->psf->get_sk(ctx, ik, this->wfcpw, structure_factor);
 
     if (vmax > 0.0)
     {
@@ -172,7 +188,7 @@ void pseudopot_cell_vnl::getvnl(
             structure_factor,
             vkb_in);
         // The atom-resolved evaluator has filled vkb_in, completing the moving-projector calculation.
-        ModuleBase::timer::end("pp_cell_vnl", "getvnl");
+        ModuleBase::timer::end("pp_cell_vnl", "build_vnl");
         return;
     }
 
@@ -234,7 +250,7 @@ void pseudopot_cell_vnl::getvnl(
         structure_factor,
         vkb_in);
 
-    ModuleBase::timer::end("pp_cell_vnl", "getvnl");
+    ModuleBase::timer::end("pp_cell_vnl", "build_vnl");
 }
 
 // Explicit instantiations for CPU/GPU and float/double precision.
@@ -271,4 +287,44 @@ template void pseudopot_cell_vnl::getvnl<double, base_device::DEVICE_GPU>(
     const std::vector<ModuleBase::Vector3<double>> &,
     std::complex<double> *,
     int) const;
+#endif
+
+// Explicit instantiations for CPU/GPU and float/double precision.
+template void pseudopot_cell_vnl::build_vnl<float, base_device::DEVICE_CPU>(
+    base_device::DEVICE_CPU *,
+    const UnitCell &,
+    const int &,
+    const ModuleBase::Vector3<double> &,
+    const std::vector<ModuleBase::Vector3<double>> &,
+    const std::complex<float> *,
+    std::complex<float> *,
+    const int &) const;
+template void pseudopot_cell_vnl::build_vnl<double, base_device::DEVICE_CPU>(
+    base_device::DEVICE_CPU *,
+    const UnitCell &,
+    const int &,
+    const ModuleBase::Vector3<double> &,
+    const std::vector<ModuleBase::Vector3<double>> &,
+    const std::complex<double> *,
+    std::complex<double> *,
+    const int &) const;
+#if defined(__CUDA) || defined(__ROCM)
+template void pseudopot_cell_vnl::build_vnl<float, base_device::DEVICE_GPU>(
+    base_device::DEVICE_GPU *,
+    const UnitCell &,
+    const int &,
+    const ModuleBase::Vector3<double> &,
+    const std::vector<ModuleBase::Vector3<double>> &,
+    const std::complex<float> *,
+    std::complex<float> *,
+    const int &) const;
+template void pseudopot_cell_vnl::build_vnl<double, base_device::DEVICE_GPU>(
+    base_device::DEVICE_GPU *,
+    const UnitCell &,
+    const int &,
+    const ModuleBase::Vector3<double> &,
+    const std::vector<ModuleBase::Vector3<double>> &,
+    const std::complex<double> *,
+    std::complex<double> *,
+    const int &) const;
 #endif

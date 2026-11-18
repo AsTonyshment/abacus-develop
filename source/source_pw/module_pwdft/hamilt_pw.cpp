@@ -1,4 +1,5 @@
 #include "hamilt_pw.h"
+#include <cstdlib>
 
 #include "op_pw_ekin.h"
 #include "op_pw_exx.h"
@@ -219,7 +220,8 @@ HamiltPW<T, Device>::~HamiltPW()
 
 template <typename T, typename Device>
 void HamiltPW<T, Device>::bind_td_state(
-    const Real *veff, const ModuleBase::Vector3<double> &A_ha, const std::vector<ModuleBase::Vector3<double>> &ion_vel)
+    const Real *veff, const ModuleBase::Vector3<double> &A_ha, const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+    const std::vector<ModuleBase::Vector3<double>> &tau)
 {
     Operator<T, Device> *op = this->ops;
     while (op != nullptr)
@@ -237,11 +239,40 @@ void HamiltPW<T, Device>::bind_td_state(
             TDNonlocalPW<T, Device> *td_nonlocal = dynamic_cast<TDNonlocalPW<T, Device> *>(op);
             if (td_nonlocal != nullptr)
             {
-                td_nonlocal->bind(A_ha, ion_vel);
+                td_nonlocal->bind(A_ha, ion_vel, tau);
             }
         }
         op = op->next_op;
     }
+}
+
+template <typename T, typename Device>
+NLProjPW<typename GetTypeReal<T>::type, Device> &HamiltPW<T, Device>::td_projectors()
+{
+    for (Operator<T, Device> *op = this->ops; op != nullptr; op = op->next_op)
+    {
+        TDNonlocalPW<T, Device> *nl = dynamic_cast<TDNonlocalPW<T, Device> *>(op);
+        if (nl != nullptr)
+        {
+            return nl->projectors();
+        }
+    }
+    ModuleBase::WARNING_QUIT("td_projectors", "Missing RT nonlocal operator.");
+    std::abort();
+}
+
+template <typename T, typename Device>
+const T *HamiltPW<T, Device>::td_projections() const
+{
+    for (Operator<T, Device> *op = this->ops; op != nullptr; op = op->next_op)
+    {
+        const TDNonlocalPW<T, Device> *nl = dynamic_cast<const TDNonlocalPW<T, Device> *>(op);
+        if (nl != nullptr)
+        {
+            return nl->projections();
+        }
+    }
+    return nullptr;
 }
 
 template <typename T, typename Device>

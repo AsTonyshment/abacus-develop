@@ -44,20 +44,19 @@ class TDPropPW
     void begin_trial();
     double sample_time(double left, double right) const;
     hsolver::TDOrbOps<T, Device> &orbitals() { return *orb_ops_; }
-    /** @brief Restore the endpoint sample before returning to density construction. */
+    /** @brief Select endpoint operators before returning to density construction. */
     void evolve(
         hamilt::HamiltPW<T, Device> *hamilt,
         const typename GetTypeReal<T>::type *veff,
-        int nveff,
+        const int &nveff,
         const TDHistoryPW<T, Device> &history,
         const elecstate::TDFieldManager &field,
-        TDIonPW *ions,
         const unitcell::IonicState &sample,
         const unitcell::IonicState &right,
         psi::Psi<T, Device> *current,
-        int elec_step,
-        int scf_iter,
-        bool log_detail);
+        const int &elec_step,
+        const int &scf_iter,
+        const bool &log_detail);
 
   private:
     const ModulePW::PW_Basis_K &basis_;

@@ -8,6 +8,33 @@
 
 namespace hamilt
 {
+template <typename FPTYPE, typename Device>
+void FS_Nonlocal_tools<FPTYPE, Device>::load_orbs(
+    const int &ik, const int &cols, const int &ld,
+    const std::complex<FPTYPE> *beta, const std::complex<FPTYPE> *proj)
+{
+    ModuleBase::timer::start("FS_Nonlocal_tools", "load_orbs");
+    const int npw = this->wfc_basis_->npwk[ik];
+    if (npw > 0)
+    {
+        // Position derivatives overwrite their workspace; the sampled projectors remain immutable.
+        base_device::memory::synchronize_memory_2d_op<std::complex<FPTYPE>, Device, Device>()(
+            this->ppcell_vkb, npw, beta, ld, npw, this->nkb);
+    }
+    if (this->becp == nullptr)
+    {
+        resmem_complex_op()(this->becp, cols * this->nkb);
+    }
+    base_device::memory::synchronize_memory_op<std::complex<FPTYPE>, Device, Device>()(
+        this->becp, proj, cols * this->nkb);
+    ModuleBase::timer::end("FS_Nonlocal_tools", "load_orbs");
+}
+template void FS_Nonlocal_tools<double, base_device::DEVICE_CPU>::load_orbs(
+    const int &, const int &, const int &, const std::complex<double> *, const std::complex<double> *);
+#if defined(__CUDA) || defined(__ROCM)
+template void FS_Nonlocal_tools<double, base_device::DEVICE_GPU>::load_orbs(
+    const int &, const int &, const int &, const std::complex<double> *, const std::complex<double> *);
+#endif
 
 template <typename FPTYPE, typename Device>
 void FS_Nonlocal_tools<FPTYPE, Device>::cal_vkb(

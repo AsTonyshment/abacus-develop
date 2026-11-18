@@ -21,6 +21,15 @@ class DomainDecomposition;
  */
 namespace MD_func
 {
+/**
+ * @brief For PW RT-TDDFT Ehrenfest dynamics.
+ * Step zero returns the initial state to MD and each subsequent call returns an accepted endpoint.
+ */
+void coupled_step(
+    ModuleESolver::ESolver *solver,
+    const int &step,
+    MDCell *cell,
+    double *potential);
 
 /**
  * @brief generate a Gaussian random number

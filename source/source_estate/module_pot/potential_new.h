@@ -118,8 +118,6 @@ class Potential : public PotBase
         this->td_field_manager_ = field_manager;
     }
 
-    // Shared RT-TDDFT field state used to prepare instantaneous ionic forces.
-    const TDFieldManager* td_field_manager() const { return td_field_manager_.get(); }
     // Electronic and ionic scalar-field energies in Ry for RT-TDDFT energy accounting.
     void td_field_energy(const Charge& charge, double& electronic, double& ionic) const;
 

@@ -314,6 +314,8 @@ struct Input_para
     // ==============   #Parameters (9.rt-tddft) ===========================
     double td_dt = -1.0;                         ///< time step for propagation
     int td_max_halvings = 0;                     ///< Maximum depth of PW real-time interval bisection; zero disables retries.
+    int td_ion_nmax = 1;                         ///< Ionic velocity iteration limit; 1 selects a single propagation.
+    double td_ion_thr = 1e-8;                    ///< Maximum ionic velocity residual in Hartree atomic units.
     int td_scf_nmax = 100;                       ///< SCF limit per real-time propagation attempt, independent of initial-state SCF.
     int estep_per_md = 1;                        ///< number of electronic steps per MD step
     std::string lin_solver = "gmres";            ///< linear solver for real-time propagation

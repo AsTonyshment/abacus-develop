@@ -2,6 +2,40 @@
 
 namespace unitcell
 {
+bool same_positions(const UnitCell &cell, const std::vector<ModuleBase::Vector3<double>> &positions)
+{
+    if (positions.size() != static_cast<size_t>(cell.nat))
+    {
+        return false;
+    }
+    int atom = 0;
+    for (int it = 0; it < cell.ntype; ++it)
+    {
+        for (int ia = 0; ia < cell.atoms[it].na; ++ia, ++atom)
+        {
+            if (!(cell.atoms[it].tau[ia] == positions[atom]))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+std::vector<ModuleBase::Vector3<double>> cell_positions(const UnitCell &cell)
+{
+    std::vector<ModuleBase::Vector3<double>> positions;
+    positions.reserve(cell.nat);
+    for (int it = 0; it < cell.ntype; ++it)
+    {
+        for (int ia = 0; ia < cell.atoms[it].na; ++ia)
+        {
+            positions.push_back(cell.atoms[it].tau[ia]);
+        }
+    }
+    return positions;
+}
+
 IonicState capture_ions(const UnitCell &cell, double t_pos, double t_vel)
 {
     IonicState state;

@@ -2,11 +2,11 @@
 
 #include "source_base/constants.h"
 #include "source_base/formatter.h"
+#include "source_base/global_function.h"
 #include "source_io/module_current/td_current_pw.h"
 #include "source_io/module_current/td_spin_pw_io.h"
 #include "source_io/module_efield/td_efield_io.h"
 #include "source_io/module_efield/td_vecpot_io.h"
-#include "source_io/module_output/output_log.h"
 #include "source_io/module_output/td_conserv_io.h"
 
 #include <iomanip>
@@ -15,38 +15,25 @@
 
 namespace ModuleIO
 {
-void out_ion_force(
-    const UnitCell &cell,
-    const pw::IonAccel &ions,
-    const ModuleBase::matrix &force,
-    bool out_stat,
-    int rank,
-    std::ofstream &log)
+namespace
 {
-    if (rank != 0)
-    {
-        return;
-    }
+//! Format an interval in fs for substep and retry messages.
+std::string td_interval_text(const double &left, const double &right)
+{
+    std::ostringstream interval;
+    interval << std::setprecision(12) << "[" << left << ", " << right << "] fs";
+    return interval.str();
+}
+} // namespace
 
-    // Report physical force components whenever RT-TDDFT forces are requested.
-    ModuleBase::matrix derivative(ions.dpi);
-    ModuleBase::matrix reaction(ions.reaction);
-    derivative *= 2.0;
-    reaction *= 2.0;
-    ModuleIO::print_force(log, cell, "NUCLEAR VELOCITY FORCE (eV/Angstrom)", derivative, false);
-    ModuleIO::print_force(log, cell, "CONSTRAINT REACTION (eV/Angstrom)", reaction, false);
-
-    if (out_stat)
-    {
-        const std::ios::fmtflags flags = log.flags();
-        const std::streamsize precision = log.precision();
-        log << " RT ionic inertia: LAPACK info=" << ions.status << ", relative residual=" << std::scientific << std::setprecision(12)
-            << ions.residual << '\n';
-        log.flags(flags);
-        log.precision(precision);
-    }
-
-    ModuleIO::print_force(log, cell, "TOTAL-FORCE (eV/Angstrom)", force, false);
+void out_ion_stat(std::ofstream *log, const int &status, const double &residual)
+{
+    const std::ios::fmtflags flags = log->flags();
+    const std::streamsize precision = log->precision();
+    *log << " RT ionic inertia: LAPACK info=" << status << ", relative residual=" << std::scientific << std::setprecision(12) << residual
+         << '\n';
+    log->flags(flags);
+    log->precision(precision);
 }
 
 void prep_td_out(
@@ -116,12 +103,8 @@ void out_td_energy(
     std::ostream *log,
     std::ostream *out)
 {
-    if (rank != 0)
-    {
-        return;
-    }
-
-    if (out_stat)
+    // Only the shared energy file needs a designated writer rank.
+    if (rank == 0 && out_stat)
     {
         write_td_energy(out_dir, step, dt, potential, total, total_field, kinetic, vel_corr, smearing, elec_field, ion_field, *log);
     }
@@ -157,10 +140,10 @@ void out_td_energy(
     log->precision(log_prec);
 }
 
-std::string print_td_trial(
-    double left,
-    double right,
-    int depth,
+void print_td_trial(
+    const double &left,
+    const double &right,
+    const int &depth,
     std::ostream *log,
     std::ostream *out)
 {
@@ -168,39 +151,102 @@ std::string print_td_trial(
     *log << " TD trial: [" << std::setprecision(12) << left << ", " << right << "] fs, depth=" << depth << '\n';
     log->precision(precision);
 
-    std::ostringstream interval;
-    interval << std::setprecision(12) << "[" << left << ", " << right << "] fs";
-    const std::string text = interval.str();
     if (depth > 0)
     {
+        const std::string text = td_interval_text(left, right);
         *out << " TD substep: " << text << std::endl;
     }
-    return text;
 }
 
 void print_td_result(
-    int iter,
-    double residual,
-    bool converged,
-    bool accepted,
+    const int &iter,
+    const double &res,
+    const bool &conv,
+    const bool &accepted,
     std::ostream *log)
 {
     // Report convergence and acceptance separately because an iteration-limited endpoint can still advance propagation.
     const std::ios::fmtflags flags = log->flags();
     const std::streamsize precision = log->precision();
-    *log << " TD trial result: iterations=" << iter << ", residual=" << std::scientific << std::setprecision(12) << residual
-         << ", converged=" << converged << ", accepted=" << accepted << '\n';
+    *log << " TD trial result: iterations=" << iter << ", residual=" << std::scientific << std::setprecision(12) << res
+         << ", converged=" << conv << ", accepted=" << accepted << '\n';
     // Restore stream formatting so TD diagnostics leave subsequent shared-log output unchanged.
     log->flags(flags);
     log->precision(precision);
 }
 
-void print_td_retry(const std::string &interval, std::ostream *out)
+void print_td_retry(const double &left, const double &right, std::ostream *out)
 {
+    const std::string interval = td_interval_text(left, right);
     *out << " TD retry: SCF not converged; splitting " << interval << " into two half steps." << std::endl;
 }
 
-void ctrl_output_td_pw(
+void print_ion_trial(
+    const int &step,
+    const int &iter,
+    const int &limit,
+    std::ostream *log,
+    std::ostream *out)
+{
+    *log << " TD ionic trial: step=" << step + 1 << " iteration=" << iter << '\n';
+    if (limit > 1)
+    {
+        *out << " IONIC ITERATION: " << iter << " / " << limit << std::endl;
+    }
+}
+
+void print_td_coupled(
+    const int &step,
+    const int &iter,
+    const int &limit,
+    const int &elec_iters,
+    const double &elec_res,
+    const double &vel_res,
+    const double &vel_thr,
+    const double &inertia_res,
+    const int &inertia_status,
+    const bool &conv,
+    const bool &accepted,
+    std::ostream *log,
+    std::ostream *out)
+{
+    const std::ios::fmtflags flags = log->flags();
+    const std::streamsize precision = log->precision();
+    *log << std::scientific << std::setprecision(15) << " TD coupled: step=" << step + 1 << " iteration=" << iter
+         << " electronic_iterations=" << elec_iters << " electronic_residual=" << elec_res << " velocity_residual=" << vel_res
+         << " inertia_residual=" << inertia_res << " inertia_status=" << inertia_status << " converged=" << conv << " accepted=" << accepted
+         << '\n';
+    log->flags(flags);
+    log->precision(precision);
+
+    // Single propagation retains diagnostics in the log without ionic convergence output.
+    if (limit == 1)
+    {
+        return;
+    }
+
+    // Show the ionic stopping criterion after the electronic iteration output.
+    const std::ios::fmtflags out_flags = out->flags();
+    const std::streamsize out_prec = out->precision();
+    *out << " Ionic residual: " << std::scientific << std::setprecision(4) << vel_res << " a.u.   Threshold: " << vel_thr << " a.u."
+         << std::endl;
+    out->flags(out_flags);
+    out->precision(out_prec);
+
+    if (accepted && !conv)
+    {
+        *out << " WARNING: Coupled step is unconverged; accepting the corrected endpoint." << std::endl;
+    }
+}
+
+void print_td_vecpot(const ModuleBase::Vector3<double> &vecpot, std::ofstream *log)
+{
+    ModuleBase::GlobalFunc::OUT(*log, "Cartesian vector potential Ax(t)", vecpot[0]);
+    ModuleBase::GlobalFunc::OUT(*log, "Cartesian vector potential Ay(t)", vecpot[1]);
+    ModuleBase::GlobalFunc::OUT(*log, "Cartesian vector potential Az(t)", vecpot[2]);
+}
+
+void out_curr_spin_pw(
     const pw::TDVelResultPW &currents,
     const pw::TDSpinResultPW &moments,
     const pw::CurrentRequest &request,
@@ -226,6 +272,10 @@ void ctrl_output_td_pw(
         const int spin_mult = nspin == 2 ? 2 : 1;
         const int nk = nkstot / spin_mult;
         write_current_pw(currents, step, nk, request.charge_per_k, directory);
+        if (request.charge_ions)
+        {
+            write_ion_current_pw(currents, step, directory, &log);
+        }
     }
     if (nspin == 4)
     {

@@ -3,6 +3,7 @@
 
 #include "source_estate/elecstate.h"
 #include "source_pw/module_pwdft/op_pw_vel.h"
+#include "source_pw/module_pwdft/nl_orb_data.h"
 #include "source_pw/module_rt/td_obs_pw.h"
 
 #include <complex>
@@ -26,6 +27,11 @@ class TDVelPW
     ct::Tensor dots_;
     std::vector<Complex> diag_;
     std::vector<Complex> cross_;
+    ct::Tensor nl_dots_;
+    std::vector<double> nl_host_;
+
+    void add_nl_current(const hamilt::NLOrbData<Real, Device> &orbs, const int &ik, const ModuleBase::matrix &weights,
+                        const CurrentRequest &request, TDVelResultPW *result);
 
   public:
     /** @brief Bind once; dependencies must outlive this object and retain their layout.
@@ -47,7 +53,8 @@ class TDVelPW
         const ModuleBase::Vector3<double> &a,
         const ModuleBase::Vector3<double> &nonlocal_a,
         const std::vector<ModuleBase::Vector3<double>> &ion_vel,
-        const CurrentRequest &request);
+        const CurrentRequest &request,
+        const hamilt::NLOrbData<Real, Device> *nl_orbs);
 };
 } // namespace pw
 #endif

@@ -35,6 +35,7 @@ class TDOrbOps
     std::ostream& log_;
     unsigned int warned_events_ = 0;
     LinearWorkspace<T, Device> band_products_;
+    std::vector<T> band_dots_;
     void prepare_buffers(int nbands, int nbasis);
     void correct_orbitals(T* current, int ld, int dim, int bands, int ik, int istep, int iter, bool detailed_output);
     void record_orth(const OrthResult& result, int ik, int istep, int iter);
@@ -72,6 +73,8 @@ class TDOrbOps
 
     /** @brief Evaluate band expectations after the caller restores the endpoint Hamiltonian. */
     void cal_band_energy(HSOperator<T, Device>& op, const psi::Psi<T, Device>& current, ModuleBase::matrix* energies);
+    /** @brief Contract one already evaluated Hpsi block with its endpoint orbitals. */
+    void cal_band_dot(const T *wave, const T *hpsi, const int &ld, const int &dim, const int &bands, double *energies);
 
     /** @brief Return the pool-reduced, column-major Psi-adjoint H Psi for one local k point. */
     std::vector<std::complex<double>> cal_eij(HSOperator<T, Device>& op, const psi::Psi<T, Device>& current, const int ik);

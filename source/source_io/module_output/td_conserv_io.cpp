@@ -81,11 +81,6 @@ void print_conserv(
     const std::string &orth,
     std::ofstream &log)
 {
-    if (!log.good())
-    {
-        return;
-    }
-
     const char *stage = step == 0 ? "initial state" : "propagation";
     const int evolve_step = step + 1;
     const double delta_wave = values.npsi - npsi0;

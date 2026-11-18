@@ -12,6 +12,8 @@
 #include "source_estate/elecstate.h"
 #include "source_psi/psi.h"
 #include "source_pw/module_pwdft/dftu_base.h"
+#include "source_pw/module_pwdft/force_result.h"
+#include "source_pw/module_pwdft/nl_orb_data.h"
 #include "source_pw/module_pwdft/vl_pw.h"
 
 #include <string>
@@ -55,24 +57,28 @@ class Forces
     ~Forces() {};
 
     /**
-     * @brief Return PW forces in Ry/Bohr and print them in eV/Angstrom.
+     * @brief Evaluate PW force contributions in Ry/Bohr.
+     * @param ion_force Optional Ewald force at the same positions and lattice.
      * @param esolver_type Selects the RT-TDDFT instantaneous-force treatment for "tddft".
      * @param nonlocal_a RT-TDDFT nonlocal momentum shift in Hartree atomic units; zero for ground-state calls.
      * @param ion_vel RT-TDDFT nuclear velocities in type-major order and Hartree atomic units; non-RT callers pass an empty vector.
      * @param electric RT-TDDFT electric field in Hartree atomic units; zero for ground-state calls.
+     * @param[out] result Force contributions and total force; must point to writable storage.
      */
     void cal_force(
+        const hamilt::NLOrbData<FPTYPE, Device> *nl_orbs,
+        const ModuleBase::matrix *ion_force,
         const std::string &esolver_type,
         const ModuleBase::Vector3<double> &nonlocal_a,
         const std::vector<ModuleBase::Vector3<double>> &ion_vel,
         const ModuleBase::Vector3<double> &electric,
-        const int nspin,
-        const bool domag,
-        const bool domag_z,
-        const int gga_grad,
-        const bool use_onsite_projection,
+        const int &nspin,
+        const bool &domag,
+        const bool &domag_z,
+        const int &gga_grad,
+        const bool &use_onsite_projection,
         UnitCell &ucell,
-        ModuleBase::matrix &force,
+        PWForceResult *result,
         const vdw::VdwResult *vdw_result,
         const elecstate::ElecState &elec,
         const ModulePW::PW_Basis *const rho_basis,
@@ -86,7 +92,27 @@ class Forces
         ModulePW::PW_Basis_K *psi_basis = nullptr,
         const psi::Psi<std::complex<FPTYPE>, Device> *psi_in = nullptr);
 
+    /** @brief Reevaluate traveling-projector forces at fixed orbitals, density, positions and field.
+     * All velocity-independent contributions must already belong to this endpoint.
+     * This entry supports the norm-conserving RT model.
+     */
+    void update_nl_force(
+        const hamilt::NLOrbData<FPTYPE, Device> *nl_orbs,
+        const ModuleBase::Vector3<double> &nonlocal_a,
+        const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+        const elecstate::ElecState &elec,
+        K_Vectors *kv,
+        ModulePW::PW_Basis_K *basis,
+        Structure_Factor *sf,
+        const pseudopot_cell_vnl &pp,
+        UnitCell &cell,
+        const psi::Psi<std::complex<FPTYPE>, Device> *wave,
+        PWForceResult *result);
+
   protected:
+    //! Assemble force contributions and apply the established net-force and symmetry treatment.
+    void sum_force(const UnitCell &cell, ModuleSymmetry::Symmetry *symm, PWForceResult *result);
+
     int nat = 0;
     int npwx = 0;
 
@@ -123,6 +149,7 @@ class Forces
      */
     // nonlocal_a selects the RT-TDDFT projector shift in Hartree atomic units; ground-state calls pass zero.
     void cal_force_nl(
+        const hamilt::NLOrbData<FPTYPE, Device> *nl_orbs,
         ModuleBase::matrix &forcenl,
         const ModuleBase::Vector3<double> &nonlocal_a,
         const std::vector<ModuleBase::Vector3<double>> &ion_vel,

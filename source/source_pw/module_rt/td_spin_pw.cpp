@@ -1,4 +1,5 @@
 #include "source_pw/module_rt/td_spin_pw.h"
+#include "source_cell/ionic_state.h"
 
 #include "source_base/parallel_reduce.h"
 #include "source_base/timer.h"
@@ -214,6 +215,7 @@ void TDSpinPW<Real, Device>::soc(
     const ModuleBase::matrix &weights,
     const ModuleBase::Vector3<double> &a,
     const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+    const hamilt::NLOrbData<Real, Device> *nl_orbs,
     TDSpinResultPW *result)
 {
     const UnitCell &cell = *cell_;
@@ -229,36 +231,66 @@ void TDSpinPW<Real, Device>::soc(
     const int nbands = psi.get_nbands();
     // Projection kernels count spin-component columns, not physical bands.
     const int ncols = 2 * nbands;
-    const int ld_psi = psi.get_nbasis();
-    const std::int64_t size = std::max<std::int64_t>(1, static_cast<std::int64_t>(pp.nkb) * basis.npwk_max);
-    // Empty local PW partitions still need a correctly typed buffer before projector reductions.
-    if (beta_.NumElements() < size || beta_.data_type() != ct::DataTypeToEnum<Complex>::value || beta_.device_type() != device)
+    const bool reuse = nl_orbs != nullptr
+        && nl_orbs->matches(cell, a, ion_vel, basis.nks, basis.npwk_max, ncols, pp.nkb, 0);
+    if (nl_orbs != nullptr && !reuse)
     {
-        beta_ = ct::Tensor(ct::DataTypeToEnum<Complex>::value, device, {size});
+        ModuleBase::WARNING_QUIT("RT observables", "Shared products belong to another endpoint.");
     }
-    Complex *beta = beta_.template data<Complex>();
+    const int ld_psi = psi.get_nbasis();
+    Complex *beta = nullptr;
+    if (!reuse)
+    {
+        const std::int64_t size = std::max<std::int64_t>(1, static_cast<std::int64_t>(pp.nkb) * basis.npwk_max);
+        // Independent projection needs a typed buffer even on empty local PW partitions.
+        if (beta_.NumElements() < size || beta_.data_type() != ct::DataTypeToEnum<Complex>::value || beta_.device_type() != device)
+        {
+            beta_ = ct::Tensor(ct::DataTypeToEnum<Complex>::value, device, {size});
+        }
+        beta = beta_.template data<Complex>();
+    }
     const size_t count = static_cast<size_t>(pp.nkb) * ncols;
-    projections_.resize(count);
-    contracted_.resize(count);
+    // Only the pool root consumes the reduced overlaps in the SOC contraction.
+    if (basis.poolrank == 0)
+    {
+        projections_.resize(count);
+        contracted_.resize(count);
+    }
     Device *context = nullptr;
     for (int ik = 0; ik < basis.nks; ++ik)
     {
         psi.fix_k(ik);
         const int npw = basis.npwk[ik];
-        if (npw > 0)
+        if (!reuse && npw > 0)
         {
             pp.getvnl(context, cell, ik, a, ion_vel, beta, basis.npwk_max);
         }
-        nonlocal_.project_contract(cell, pp, basis, 0, ncols, ld_psi, 2, npw, beta, psi.get_pointer());
+        if (!reuse)
+        {
+            nonlocal_.project_contract(cell, pp, basis, 0, ncols, ld_psi, 2, npw, beta, psi.get_pointer());
+        }
         if (basis.poolrank != 0)
         {
             // B and DB already contain the full pool sum; count each k-point contribution only once.
             continue;
         }
-        base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>()(
-            projections_.data(), nonlocal_.projections(), count);
-        base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>()(
-            contracted_.data(), nonlocal_.contracted(), count);
+        const Complex *proj = nonlocal_.projections();
+        const Complex *db = nonlocal_.contracted();
+        if (reuse)
+        {
+            proj = nl_orbs->proj(ik);
+            db = nl_orbs->dproj(ik);
+        }
+        base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>()(projections_.data(), proj, count);
+        base_device::memory::synchronize_memory_op<Complex, base_device::DEVICE_CPU, Device>()(contracted_.data(), db, count);
+        if (reuse)
+        {
+            // The shared derivative contractions use Hartree; the torque formula below consumes Ry.
+            for (Complex &value : contracted_)
+            {
+                value *= Real(2);
+            }
+        }
         int offset = 0;
         int atom = 0;
         const Complex imaginary(0, 1);
@@ -379,7 +411,8 @@ TDSpinResultPW TDSpinPW<Real, Device>::calculate(
     const elecstate::ElecState &state,
     const ModuleBase::Vector3<double> &a,
     const ModuleBase::Vector3<double> &nonlocal_a,
-    const std::vector<ModuleBase::Vector3<double>> &ion_vel)
+    const std::vector<ModuleBase::Vector3<double>> &ion_vel,
+    const hamilt::NLOrbData<Real, Device> *nl_orbs)
 {
     ModuleBase::timer::start("TDSpinPW", "calculate");
     if (cell_ == nullptr)
@@ -400,7 +433,7 @@ TDSpinResultPW TDSpinPW<Real, Device>::calculate(
     }
     if (calc_torque_)
     {
-        soc(psi, state.wg, nonlocal_a, ion_vel, &result);
+        soc(psi, state.wg, nonlocal_a, ion_vel, nl_orbs, &result);
     }
     // Observable evaluation must preserve the caller's k-point cursor.
     psi.fix_k(old_k);
